@@ -14,7 +14,7 @@ from external_converter import ExternalConverter
 class Config:
     HA_DISCOVERY_TOPIC = "homeassistant/{}/{}_{}/config"
     HA_STATE_TOPIC = "rustuya/event/{}/{}"
-    HA_COMMAND_TOPIC = "rustuya/command/{}/{}"
+    HA_COMMAND_TOPIC = "rustuya/command/set/{}/{}"
     HA_ERROR_TOPIC = "rustuya/error/{}"
     DEFAULT_MANUFACTURER = "rustuya"
 
@@ -124,6 +124,9 @@ class DiscoveryGenerator:
             
             base = "value_json.value"
             
+            if comp in ["binary_sensor", "switch"] and not val_map:
+                return "{{ 'true' if value_json.value else 'false' }}"
+
             # 1. Scaling
             if scale > 0:
                 expr = "((%s | float) / %g) | round(1)" % (base, 10 ** scale)
@@ -187,10 +190,10 @@ class DiscoveryGenerator:
                 payload.update({"percentage_command_topic": Config.HA_COMMAND_TOPIC.format(dev_id, sp_dp), "percentage_state_topic": Config.HA_STATE_TOPIC.format(dev_id, sp_dp), "percentage_value_template": get_tpl("fan")})
                 consumed.add(sp_dp)
                 if sw_dp:
-                    payload.update({"command_topic": Config.HA_COMMAND_TOPIC.format(dev_id, sw_dp), "state_topic": Config.HA_STATE_TOPIC.format(dev_id, sw_dp), "state_value_template": get_tpl("fan"), "payload_on": True, "payload_off": False})
+                    payload.update({"command_topic": Config.HA_COMMAND_TOPIC.format(dev_id, sw_dp), "state_topic": Config.HA_STATE_TOPIC.format(dev_id, sw_dp), "state_value_template": get_tpl("fan"), "payload_on": "true", "payload_off": "false"})
                     consumed.add(sw_dp)
                 if osc_dp:
-                    payload.update({"oscillation_command_topic": Config.HA_COMMAND_TOPIC.format(dev_id, osc_dp), "oscillation_state_topic": Config.HA_STATE_TOPIC.format(dev_id, osc_dp), "oscillation_value_template": get_tpl("fan"), "payload_on": True, "payload_off": False})
+                    payload.update({"oscillation_command_topic": Config.HA_COMMAND_TOPIC.format(dev_id, osc_dp), "oscillation_state_topic": Config.HA_STATE_TOPIC.format(dev_id, osc_dp), "oscillation_value_template": get_tpl("fan"), "payload_on": "true", "payload_off": "false"})
                     consumed.add(osc_dp)
                 results[Config.HA_DISCOVERY_TOPIC.format("fan", dev_id, "fan")] = payload
 
@@ -202,7 +205,7 @@ class DiscoveryGenerator:
                 payload.update({"brightness_command_topic": Config.HA_COMMAND_TOPIC.format(dev_id, br_dp), "brightness_state_topic": Config.HA_STATE_TOPIC.format(dev_id, br_dp), "brightness_value_template": get_tpl("light")})
                 consumed.add(br_dp)
                 if sw_dp:
-                    payload.update({"command_topic": Config.HA_COMMAND_TOPIC.format(dev_id, sw_dp), "state_topic": Config.HA_STATE_TOPIC.format(dev_id, sw_dp), "payload_on": True, "payload_off": False, "state_value_template": get_tpl("light")})
+                    payload.update({"command_topic": Config.HA_COMMAND_TOPIC.format(dev_id, sw_dp), "state_topic": Config.HA_STATE_TOPIC.format(dev_id, sw_dp), "payload_on": "true", "payload_off": "false", "state_value_template": get_tpl("light")})
                     consumed.add(sw_dp)
                 if tm_dp:
                     payload.update({"color_temp_command_topic": Config.HA_COMMAND_TOPIC.format(dev_id, tm_dp), "color_temp_state_topic": Config.HA_STATE_TOPIC.format(dev_id, tm_dp), "color_temp_value_template": get_tpl("light")})
@@ -239,7 +242,7 @@ class DiscoveryGenerator:
                     if k in meta: payload[k] = meta[k]
             elif comp == "select" and 'options' in meta:
                 payload["options"] = meta['options']
-            elif comp in ["binary_sensor", "switch"]: payload.update({"payload_on": True, "payload_off": False})
+            elif comp in ["binary_sensor", "switch"]: payload.update({"payload_on": "true", "payload_off": "false"})
             if comp not in ['sensor', 'binary_sensor', 'event']: payload["command_topic"] = Config.HA_COMMAND_TOPIC.format(dev_id, d_id)
             results[Config.HA_DISCOVERY_TOPIC.format(comp, dev_id, code)] = payload
         return results
