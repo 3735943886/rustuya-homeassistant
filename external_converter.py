@@ -1,10 +1,14 @@
 import json
-import yaml
 import re
 import logging
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Any, List, Optional, Tuple
+
+try:
+    import yaml
+except:
+    pass
 
 logger = logging.getLogger("external_converter")
 
@@ -13,10 +17,10 @@ class ConverterConfig:
     BASE_PATH = Path("external_converter")
     YAML_PATH = BASE_PATH
     TS_PATH = BASE_PATH
-    
+
     CUSTOM_CONVERTER_PATH = "custom_converters.json"
     CACHE_FILE = BASE_PATH / "yaml_cache.json"
-    
+
     # regex patterns for TS parsing
     RE_PID_TZ = r'["\'](_TZ.*?)["\']'
     RE_PID_TZE = r'["\'](_TZE.*?)["\']'
@@ -60,12 +64,12 @@ class YamlScanner:
 
         with ThreadPoolExecutor() as executor:
             results = list(executor.map(self._parse_file, files))
-        
+
         for res in filter(None, results):
             pids, data = res
             for pid in pids:
                 self.product_map[pid] = data
-        
+
         if self.product_map:
             try:
                 self.cache_path.parent.mkdir(parents=True, exist_ok=True)
@@ -77,9 +81,9 @@ class YamlScanner:
     def _parse_file(self, file_path: Path) -> Optional[Tuple[List[str], Any]]:
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
-                data = yaml.safe_load(f)
+                data = yaml.safe_load(f) if yaml else None
                 if not data or 'products' not in data: return None
-                
+
                 pids = [p.get('id') for p in data['products'] if p.get('id')]
                 if not pids: return None
 
@@ -89,7 +93,7 @@ class YamlScanner:
                     comp = entity.get('entity')
                     dev_cls = entity.get('class')
                     icon = entity.get('icon')
-                    
+
                     for dp in entity.get('dps', []):
                         dp_id = str(dp.get('id'))
                         info = {
@@ -101,7 +105,7 @@ class YamlScanner:
                         # Range / Scale / Step
                         for k in ['scale', 'min', 'max', 'step']:
                             if k in dp: info[k] = dp[k]
-                            
+
                         # Mapping (Options / Enum)
                         if 'mapping' in dp:
                             mappings = dp['mapping']
@@ -114,12 +118,12 @@ class YamlScanner:
                                 # Scale can also be inside mapping in some versions
                                 for k in ['scale', 'min', 'max', 'step']:
                                     if k in m: info[k] = m[k]
-                            
+
                             if options: info["options"] = options
                             if val_map: info["val_map"] = val_map
-                            
+
                         dp_meta[dp_id] = info
-                
+
                 return pids, {"name": data.get('name'), "dp_meta": dp_meta}
         except Exception:
             pass
@@ -135,7 +139,7 @@ class TsScanner:
         if not self.ts_path.exists():
             logger.info(f"TS converter path not found: {self.ts_path}")
             return
-            
+
         files = list(self.ts_path.rglob("*.ts"))
         for file in files:
             self._parse_file(file)
@@ -146,7 +150,7 @@ class TsScanner:
             blocks = re.split(ConverterConfig.RE_TS_BLOCK_SPLIT, content)
             for block in blocks:
                 if 'model:' not in block: continue
-                
+
                 pids = self._extract_pids(block)
                 if not pids: continue
 
@@ -155,10 +159,10 @@ class TsScanner:
                     model = model_match.group(1)
                     vendor_match = re.search(r'vendor:\s*["\'](.*?)["\']', block)
                     vendor = vendor_match.group(1) if vendor_match else "Tuya"
-                    
+
                     dp_map = {m[0]: m[1] for m in re.findall(ConverterConfig.RE_DP_MATCH, block)}
                     info = {"model": model, "vendor": vendor, "dp_map": dp_map}
-                    
+
                     for pid in pids: self.fingerprint_map[pid] = info
                     self.model_map[model] = info
         except Exception as e:
@@ -176,15 +180,15 @@ class TsScanner:
         return [p.split('_')[-1] if '_' in p else p for p in pids]
 
 class ExternalConverter:
-    def __init__(self, yaml_path: Optional[str] = None, 
-                 ts_path: Optional[str] = None, 
+    def __init__(self, yaml_path: Optional[str] = None,
+                 ts_path: Optional[str] = None,
                  custom_path: Optional[str] = None,
                  force_update: bool = False):
-        
+
         self.custom = CustomConverter(custom_path or ConverterConfig.CUSTOM_CONVERTER_PATH)
         self.yaml_scanner = YamlScanner(Path(yaml_path) if yaml_path else ConverterConfig.YAML_PATH)
         self.ts_scanner = TsScanner(Path(ts_path) if ts_path else ConverterConfig.TS_PATH)
-        
+
         self.custom.load()
         self.yaml_scanner.scan(force=force_update)
         self.ts_scanner.scan()
@@ -203,5 +207,5 @@ class ExternalConverter:
         ts_info = self.ts_scanner.fingerprint_map.get(product_id) or self.ts_scanner.model_map.get(product_id)
         if ts_info:
             return "ts", ts_info
-            
+
         return None, None
