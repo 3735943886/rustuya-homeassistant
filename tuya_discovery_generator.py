@@ -116,7 +116,7 @@ class DiscoveryGenerator:
         common_device = {"identifiers": [dev_id], "name": name, "manufacturer": Config.DEFAULT_MANUFACTURER, "model": model}
         avail = {
             "availability_topic": Config.HA_ERROR_TOPIC.format(dev_id),
-            "availability_template": "{{ 'online' if value_json.errorCode == 0 else 'offline' }}",
+            "availability_template": "{{ 'online' if value_json is defined and value_json != None and value_json.errorCode | default(-1) == 0 else 'offline' }}",
             "payload_available": "online", "payload_not_available": "offline"
         }
 
@@ -126,26 +126,27 @@ class DiscoveryGenerator:
             return None
 
         def get_tpl(comp, scale=0, val_map=None):
-            if comp == "event": return "{{ { \"event_type\": value_json.value } | to_json if value_json.type == 'active' else '' }}"
-            
-            base = "value_json.value"
+            guard = "value_json is defined and value_json != None"
+            if comp == "event": 
+                return "{{ { \"event_type\": value_json.value } | to_json if %s and value_json.type | default('') == 'active' else '' }}" % guard
             
             if comp in ["binary_sensor", "switch"] and not val_map:
-                return "{{ 'true' if value_json.value else 'false' }}"
+                return "{{ 'true' if %s and value_json.value | default(false) else 'false' }}" % guard
 
-            # 1. Scaling
+            base = "value_json.value"
             if scale > 0:
                 expr = "((%s | float) / %g) | round(1)" % (base, 10 ** scale)
             else:
                 expr = base
                 
-            # 2. Value Mapping (Enum)
             if val_map:
                 map_str = json.dumps(val_map)
-                expr = "(%s | string | lower)" % expr
-                return "{{ %s[%s] | default(%s) }}" % (map_str, expr, expr)
+                mapped_expr = "(%s | string | lower)" % expr
+                final_expr = "%s[%s] | default(%s)" % (map_str, mapped_expr, mapped_expr)
+            else:
+                final_expr = expr
                 
-            return "{{ %s }}" % expr
+            return "{{ %s if %s else '' }}" % (final_expr, guard)
 
         def check_signature(comp_type):
             sig = COMPLEX_SIGNATURES.get(comp_type)
