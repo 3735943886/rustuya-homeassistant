@@ -100,6 +100,12 @@ class DiscoveryGenerator:
                 if isinstance(meta, str):
                     try: meta = json.loads(meta)
                     except: meta = {}
+                
+                # Extract val_map from enumMappingMap
+                if 'val_map' not in meta:
+                    enum_map = val.get('config_item', {}).get('enumMappingMap')
+                    if enum_map and isinstance(enum_map, dict):
+                        meta['val_map'] = { k: v.get('value') for k, v in enum_map.items() if isinstance(v, dict) and v.get('value') }
             else: code, vtype, meta = dp_id, "String", {}
             normalized[dp_id] = {"code": code, "type": vtype, "meta": meta, "ent_info": None}
         return normalized
@@ -240,8 +246,10 @@ class DiscoveryGenerator:
             if comp == "number":
                 for k in ['min', 'max', 'step']:
                     if k in meta: payload[k] = meta[k]
-            elif comp == "select" and 'options' in meta:
-                payload["options"] = meta['options']
+            elif comp == "select":
+                options = meta.get('options') or meta.get('range')
+                if options:
+                    payload["options"] = options
             elif comp in ["binary_sensor", "switch"]: payload.update({"payload_on": "true", "payload_off": "false"})
             if comp not in ['sensor', 'binary_sensor', 'event']: payload["command_topic"] = Config.HA_COMMAND_TOPIC.format(dev_id, d_id)
             results[Config.HA_DISCOVERY_TOPIC.format(comp, dev_id, code)] = payload
