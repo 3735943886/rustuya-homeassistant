@@ -94,7 +94,6 @@ DP_CODE_MAP = {
     "relay_status": ("select", None, None, "mdi:restore"),
     "indicator": ("select", None, None, "mdi:led-on"),
     "light_mode": ("select", None, None, "mdi:led-on"),
-    "switch_inching": ("switch", None, None, "mdi:timer-outline"),
     "switch_type": ("select", None, None, "mdi:toggle-switch-outline"),
     "work_state": ("sensor", None, None, "mdi:run"),
     "alarm_active": ("binary_sensor", "safety", None, "mdi:alert"),
