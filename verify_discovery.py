@@ -201,6 +201,8 @@ class DiscoveryVerifier:
         print(f"\n📊 Overall Stats:")
         print(f"  - Devices in JSON: {len(self.devices)}")
         print(f"  - Perfect Matches: {len(self.categorized['perfect'])}")
+        for d in self.categorized["perfect"]:
+            print(f"  - 📱 {d['name']} ({d['id']})")
         
         if self.categorized["mismatched_payload"]:
             print(f"\n❌ Payload Mismatch (Content differs): {len(self.categorized['mismatched_payload'])}")
