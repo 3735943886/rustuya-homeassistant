@@ -92,7 +92,6 @@ DP_CODE_MAP = {
     # Common Settings & States
     "child_lock": ("switch", None, None, "mdi:lock"),
     "relay_status": ("select", None, None, "mdi:restore"),
-    "indicator": ("select", None, None, "mdi:led-on"),
     "light_mode": ("select", None, None, "mdi:led-on"),
     "switch_type": ("select", None, None, "mdi:toggle-switch-outline"),
     "work_state": ("sensor", None, None, "mdi:run"),
