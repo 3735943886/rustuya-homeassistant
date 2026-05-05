@@ -140,29 +140,23 @@ class DiscoveryFixer:
 
     def fix_missing(self, device: Dict[str, Any]):
         """Publish expected discovery topics for a device"""
-        client = mqtt.Client()
         try:
-            client.connect(self.host, self.port)
             expected_payloads, _ = self.generator.generate(device)
             logger.info(f"Fixing missing discovery for {device.get('name')} ({device.get('id')})...")
             for topic, payload in expected_payloads.items():
                 logger.info(f"  Publishing: {topic}")
                 publish.single(topic=topic, payload=json.dumps(payload), retain=True)
-            client.disconnect()
             print(f"✅ Successfully published {len(expected_payloads)} topics for {device.get('name')}")
         except Exception as e:
             logger.error(f"Failed to fix missing: {e}")
 
     def remove_legacy(self, device_id: str, unexpected_topics: List[str]):
         """Clear retained discovery topics that are unexpected"""
-        client = mqtt.Client()
         try:
-            client.connect(self.host, self.port)
             logger.info(f"Removing {len(unexpected_topics)} legacy topics for {device_id}...")
             for topic in unexpected_topics:
                 logger.info(f"  Clearing: {topic}")
-                client.publish(topic, "", retain=True)
-            client.disconnect()
+                publish.single(topic=topic, retain=True)
             print(f"✅ Successfully cleared {len(unexpected_topics)} legacy topics for {device_id}")
         except Exception as e:
             logger.error(f"Failed to remove legacy: {e}")
