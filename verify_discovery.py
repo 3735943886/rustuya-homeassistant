@@ -168,12 +168,18 @@ class DiscoveryManager:
         
         for d in target_list:
             dev_id = d['id']
+            # Find the full device config from self.devices
+            full_device = next((dev for dev in self.devices if dev.get('id') == dev_id), None)
+            if not full_device:
+                logger.error(f"Could not find full config for {dev_id}")
+                continue
+
             if is_bulk:
-                prompt = f"❓ {action_type.title()} for {d['name']} ({dev_id})? [Y/n]: "
+                prompt = f"❓ {action_type.replace('-', ' ').title()} for {d['name']} ({dev_id})? [Y/n]: "
                 if input(prompt).lower() not in ['', 'y', 'yes']: continue
 
             if action_type in ['add', 'add-all']:
-                self.publish_discovery(d)
+                self.publish_discovery(full_device)
             else:
                 topics = self._get_topics_for_removal(dev_id, results, only_legacy=(action_type=='remove-legacy'))
                 if topics: self.clear_topics(dev_id, topics)
