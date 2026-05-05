@@ -87,10 +87,11 @@ class DiscoveryVerifier:
 
     def verify(self):
         # 1. Generate expected topics from JSON
+        known_device_ids = set()
         for device in self.devices:
             device_id = device.get('id')
-            if not device_id:
-                continue
+            if not device_id: continue
+            known_device_ids.add(device_id)
             
             device_name = device.get('name', device_id)
             try:
@@ -138,12 +139,28 @@ class DiscoveryVerifier:
                     self.results["missing_in_mqtt"][dev_id] = {"name": dev_name, "entities": []}
                 self.results["missing_in_mqtt"][dev_id]["entities"].append(topic)
 
-        # 3. Check for topics in MQTT that are not in JSON (orphans)
+        # 3. Check for topics in MQTT that are not expected
+        self.results["unexpected_topics"] = {} # dev_id -> {name, topics: [], in_json: bool}
+        
         for topic in received_topics:
-            self.results["missing_in_json"].append({
-                "topic": topic,
-                "payload": self.received_messages[topic]["payload"]
-            })
+            payload = self.received_messages[topic]["payload"]
+            dev_info = payload.get("device", {})
+            ids = dev_info.get("identifiers", [])
+            dev_id = ids[0] if ids else "unknown"
+            
+            in_json = dev_id in known_device_ids
+            
+            if dev_id not in self.results["unexpected_topics"]:
+                # Try to find name if it's in JSON
+                name = dev_id
+                if in_json:
+                    for d in self.devices:
+                        if d.get('id') == dev_id:
+                            name = d.get('name', dev_id)
+                            break
+                self.results["unexpected_topics"][dev_id] = {"name": name, "topics": [], "in_json": in_json}
+            
+            self.results["unexpected_topics"][dev_id]["topics"].append(topic)
 
     def compare_payloads(self, actual: Dict[str, Any], expected: Dict[str, Any]) -> bool:
         return actual == expected
@@ -172,29 +189,20 @@ class DiscoveryVerifier:
             for dev_id, data in self.results["missing_in_mqtt"].items():
                 count = len(data["entities"])
                 print(f"  - 📱 {data['name']} ({dev_id}): {count} entities missing")
-                # Optional: list them if count is small?
-                if count <= 3:
-                    for t in data["entities"]:
-                        print(f"    - {t}")
-                else:
-                    print(f"    - ... and {count-3} more")
 
-        if self.results["missing_in_json"]:
-            print(f"\n👻 Orphaned Discovery (MQTT topics not in JSON): {len(self.results['missing_in_json'])}")
-            # Group orphans by device ID if possible
-            orphans_by_dev = {}
-            for item in self.results["missing_in_json"]:
-                topic = item["topic"]
-                # Try to extract device ID from topic or payload
-                payload = item["payload"]
-                dev_info = payload.get("device", {})
-                ids = dev_info.get("identifiers", [])
-                dev_id = ids[0] if ids else "unknown"
-                if dev_id not in orphans_by_dev: orphans_by_dev[dev_id] = []
-                orphans_by_dev[dev_id].append(topic)
+        if self.results["unexpected_topics"]:
+            orphans = {k: v for k, v in self.results["unexpected_topics"].items() if not v["in_json"]}
+            unexpected = {k: v for k, v in self.results["unexpected_topics"].items() if v["in_json"]}
             
-            for dev_id, topics in orphans_by_dev.items():
-                print(f"  - ❓ {dev_id}: {len(topics)} orphaned topics")
+            if orphans:
+                print(f"\n👻 Orphaned Discovery (Device ID NOT in JSON): {len(orphans)}")
+                for dev_id, data in orphans.items():
+                    print(f"  - ❓ {dev_id}: {len(data['topics'])} topics")
+            
+            if unexpected:
+                print(f"\n♻️ Legacy/Unexpected Discovery (Device ID in JSON, but topic unexpected): {len(unexpected)}")
+                for dev_id, data in unexpected.items():
+                    print(f"  - 📱 {data['name']} ({dev_id}): {len(data['topics'])} extra topics")
 
         if self.results["errors"]:
             print(f"\n❗ Errors encountered: {len(self.results['errors'])}")
@@ -203,7 +211,7 @@ class DiscoveryVerifier:
 
         print("\n" + "="*60)
         
-        total_issues = len(self.results["mismatched"]) + len(self.results["missing_in_mqtt"]) + len(self.results["missing_in_json"])
+        total_issues = len(self.results["mismatched"]) + len(self.results["missing_in_mqtt"]) + len(self.results["unexpected_topics"])
         if total_issues == 0:
             print("✨ Everything is consistent!")
         else:
