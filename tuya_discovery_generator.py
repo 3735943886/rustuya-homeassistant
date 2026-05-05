@@ -257,6 +257,10 @@ class DiscoveryGenerator:
                     payload["options"] = options
                     if comp == "sensor" and vtype == "Enum":
                         payload["device_class"] = "enum"
+            elif comp == "event":
+                event_types = meta.get('options') or meta.get('range')
+                if event_types:
+                    payload["event_types"] = event_types
 
             if comp in ["binary_sensor", "switch"]: payload.update({"payload_on": "true", "payload_off": "false"})
             if comp not in ['sensor', 'binary_sensor', 'event']: payload["command_topic"] = Config.HA_COMMAND_TOPIC.format(dev_id, d_id)
