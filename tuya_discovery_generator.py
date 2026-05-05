@@ -52,32 +52,51 @@ class DiscoveryGenerator:
         # 2. Match Source (External Converter)
         matched_source, ext_info = self.converter.find_match(product_id)
         
-        # 3. Enrich DPs
+        # 3. Enrich & Inject DPs
         info = {"vendor": "Tuya", "model": product_name}
-        if matched_source == "custom":
-            info["model"] = ext_info.get('model') or product_name
-            if "mappings" in ext_info:
-                mappings = ext_info.get("mappings", {})
-                for dp_id, val in normalized_dps.items():
-                    if mapping := mappings.get(dp_id):
-                        if isinstance(mapping, (list, tuple)): val["ent_info"] = mapping
-                        elif isinstance(mapping, str): val.update({"code": mapping, "ent_info": PROPERTY_MAP.get(mapping)})
-        elif matched_source == "yaml":
-            info["model"] = ext_info.get('name') or product_name
-            dp_meta = ext_info.get('dp_meta', {})
-            for dp_id, obj in normalized_dps.items():
-                if meta := dp_meta.get(dp_id):
-                    # Override entity info
-                    obj["ent_info"] = (meta.get('comp'), meta.get('class'), meta.get('unit'), meta.get('icon'))
-                    # Enrich metadata (scale, min, max, etc.)
-                    for k in ['scale', 'min', 'max', 'step', 'options', 'val_map']:
-                        if k in meta: obj['meta'][k] = meta[k]
-        elif matched_source == "ts":
-            info["model"] = ext_info.get('model') or product_name
-            dp_map = ext_info.get("dp_map", {})
-            for dp_id, obj in normalized_dps.items():
-                if prop := dp_map.get(dp_id):
-                    obj.update({"code": prop, "ent_info": PROPERTY_MAP.get(prop)})
+        if matched_source:
+            info["model"] = ext_info.get('model') or ext_info.get('name') or product_name
+            
+            # Gather metadata overrides/injections
+            ext_dps = ext_info.get('dp_meta', {})
+            
+            # Backward compatibility for legacy mapping formats
+            if matched_source == "custom" and "mappings" in ext_info:
+                for d_id, mapping in ext_info["mappings"].items():
+                    if str(d_id) not in ext_dps: ext_dps[str(d_id)] = {}
+                    if isinstance(mapping, str): ext_dps[str(d_id)]["code"] = mapping
+                    elif isinstance(mapping, (list, tuple)): ext_dps[str(d_id)]["ent_info"] = mapping
+            elif matched_source == "ts" and "dp_map" in ext_info:
+                for d_id, code in ext_info["dp_map"].items():
+                    if str(d_id) not in ext_dps: ext_dps[str(d_id)] = {"code": code}
+
+            # Merge / Inject
+            for dp_id, meta in ext_dps.items():
+                dp_id = str(dp_id)
+                if dp_id not in normalized_dps:
+                    # [INJECT] Add missing DP
+                    normalized_dps[dp_id] = {
+                        "code": meta.get('code', dp_id),
+                        "type": meta.get('type', "Integer"),
+                        "meta": meta,
+                        "ent_info": meta.get('ent_info')
+                    }
+                else:
+                    # [OVERRIDE] Update existing DP
+                    obj = normalized_dps[dp_id]
+                    if 'code' in meta: obj['code'] = meta['code']
+                    if 'type' in meta: obj['type'] = meta['type']
+                    if 'ent_info' in meta: obj['ent_info'] = meta['ent_info']
+                    elif matched_source == "yaml": # Handle YAML tuple style
+                        obj["ent_info"] = (meta.get('comp'), meta.get('class'), meta.get('unit'), meta.get('icon'))
+                    
+                    # Update metadata (scale, min, max, etc.)
+                    obj['meta'].update({k: v for k, v in meta.items() if k not in ['code', 'type', 'ent_info', 'comp', 'class', 'unit', 'icon']})
+
+                # Resolve ent_info if not explicitly set
+                if not normalized_dps[dp_id]["ent_info"]:
+                    normalized_dps[dp_id]["ent_info"] = PROPERTY_MAP.get(normalized_dps[dp_id]["code"])
+
         
         # Final Source Label
         source_label = matched_source or "generic"
