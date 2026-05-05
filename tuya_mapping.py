@@ -76,8 +76,6 @@ DP_CODE_MAP = {
     "electricity_left": ("sensor", "battery", "%", None),
     "contact_state": ("binary_sensor", "door", None, None),
     "doorcontact_state": ("binary_sensor", "door", None, None),
-    "presence_state": ("binary_sensor", "motion", None, None),
-    "pir": ("binary_sensor", "motion", None, None),
     "smoke_sensor_status": ("binary_sensor", "smoke", None, None),
     "gas_sensor_status": ("binary_sensor", "gas", None, None),
     "watersensor_state": ("binary_sensor", "moisture", None, None),
