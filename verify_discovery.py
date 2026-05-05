@@ -120,10 +120,48 @@ class DiscoveryVerifier:
 
         return categorized
 
+import argparse
+
+class DiscoveryFixer:
+    def __init__(self, broker_host=BROKER_HOST, broker_port=BROKER_PORT):
+        self.host = broker_host
+        self.port = broker_port
+        self.generator = initialize_generator()
+
+    def fix_missing(self, device: Dict[str, Any]):
+        """Publish expected discovery topics for a device"""
+        client = mqtt.Client()
+        try:
+            client.connect(self.host, self.port)
+            expected_payloads, _ = self.generator.generate(device)
+            logger.info(f"Fixing missing discovery for {device.get('name')} ({device.get('id')})...")
+            for topic, payload in expected_payloads.items():
+                logger.info(f"  Publishing: {topic}")
+                client.publish(topic, json.dumps(payload), retain=True)
+            client.disconnect()
+            print(f"✅ Successfully published {len(expected_payloads)} topics for {device.get('name')}")
+        except Exception as e:
+            logger.error(f"Failed to fix missing: {e}")
+
+    def remove_legacy(self, device_id: str, unexpected_topics: List[str]):
+        """Clear retained discovery topics that are unexpected"""
+        client = mqtt.Client()
+        try:
+            client.connect(self.host, self.port)
+            logger.info(f"Removing {len(unexpected_topics)} legacy topics for {device_id}...")
+            for topic in unexpected_topics:
+                logger.info(f"  Clearing: {topic}")
+                client.publish(topic, "", retain=True)
+            client.disconnect()
+            print(f"✅ Successfully cleared {len(unexpected_topics)} legacy topics for {device_id}")
+        except Exception as e:
+            logger.error(f"Failed to remove legacy: {e}")
+
 class DiscoveryVerifierRunner:
-    """CLI Runner for DiscoveryVerifier"""
+    """CLI Runner for DiscoveryVerifier with Fixing capabilities"""
     def __init__(self):
         self.verifier = DiscoveryVerifier()
+        self.fixer = DiscoveryFixer()
         self.received_messages = {}
         self.devices = []
 
@@ -133,6 +171,12 @@ class DiscoveryVerifierRunner:
                 self.devices = json.load(f)
         except Exception as e:
             logger.error(f"Failed to load devices: {e}")
+
+    def find_device(self, search_term: str) -> Dict[str, Any]:
+        for d in self.devices:
+            if d.get('id') == search_term or d.get('name') == search_term:
+                return d
+        return None
 
     def on_connect(self, client, userdata, flags, rc):
         if rc == 0:
@@ -149,10 +193,7 @@ class DiscoveryVerifierRunner:
                 }
             except: pass
 
-    def run(self):
-        self.load_devices()
-        if not self.devices: return
-
+    def collect_mqtt(self):
         client = mqtt.Client()
         client.on_connect = self.on_connect
         client.on_message = self.on_message
@@ -165,9 +206,50 @@ class DiscoveryVerifierRunner:
             client.disconnect()
         except Exception as e:
             logger.error(f"MQTT Error: {e}")
+
+    def run(self):
+        parser = argparse.ArgumentParser(description="Tuya Home Assistant Discovery Verifier & Fixer")
+        parser.add_argument("--add-missing", help="Device ID or Name to fix missing discovery")
+        parser.add_argument("--remove-legacy", help="Device ID or Name to remove legacy discovery topics")
+        args = parser.parse_args()
+
+        self.load_devices()
+        if not self.devices: return
+
+        if args.add_missing:
+            device = self.find_device(args.add_missing)
+            if device:
+                self.fixer.fix_missing(device)
+            else:
+                print(f"❌ Device '{args.add_missing}' not found in JSON.")
             return
 
+        # For removal, we need to know which topics are unexpected, so we verify first
+        self.collect_mqtt()
         categorized = self.verifier.verify(self.devices, self.received_messages)
+
+        if args.remove_legacy:
+            device = self.find_device(args.remove_legacy)
+            if not device:
+                print(f"❌ Device '{args.remove_legacy}' not found in JSON.")
+                return
+            
+            dev_id = device['id']
+            # Find unexpected topics for this device
+            unexpected = []
+            # Check categorized['unexpected_topics'] and categorized['partially_missing']
+            for cat in ['unexpected_topics', 'partially_missing']:
+                for d in categorized[cat]:
+                    if d['id'] == dev_id:
+                        unexpected.extend(d['unexpected'])
+            
+            if unexpected:
+                self.fixer.remove_legacy(dev_id, unexpected)
+            else:
+                print(f"ℹ️ No unexpected topics found for {device['name']} ({dev_id}).")
+            return
+
+        # Default: Print summary
         self.print_summary(categorized)
 
     def print_summary(self, categorized):
