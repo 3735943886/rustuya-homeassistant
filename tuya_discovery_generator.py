@@ -180,7 +180,7 @@ class DiscoveryGenerator:
         if CATEGORY_MAP.get(category) == 'cover' or check_signature('cover'):
             c_dp, p_dp, s_dp = find_dp(r'^(control|control_1|state|mach_operate)$'), find_dp(r'^(percent_control|position|percent_state)$'), find_dp(r'^(percent_state|position)$')
             if c_dp or p_dp:
-                payload = {"name": name, "unique_id": f"{dev_id}_cover", "device": common_device, **avail}
+                payload = {"name": None, "unique_id": f"{dev_id}_cover", "device": common_device, **avail}
                 if category == 'cl': payload["device_class"] = "curtain"
                 elif category == 'mc': payload["device_class"] = "window"
                 if c_dp:
@@ -197,7 +197,7 @@ class DiscoveryGenerator:
         if CATEGORY_MAP.get(category) == 'climate' or check_signature('climate'):
             t_set, t_cur, mode, sw = find_dp(r'^(temp_set|occupied_heating_setpoint)$'), find_dp(r'^(temp_current|local_temperature)$'), find_dp(r'^(mode|system_mode)$'), find_dp(r'^switch$')
             if t_set and t_cur:
-                payload = {"name": name, "unique_id": f"{dev_id}_climate", "device": common_device, **avail}
+                payload = {"name": None, "unique_id": f"{dev_id}_climate", "device": common_device, **avail}
                 payload.update({"temperature_command_topic": Config.HA_COMMAND_TOPIC.format(dev_id, t_set), "temperature_state_topic": Config.HA_STATE_TOPIC.format(dev_id, t_set), "temperature_state_template": get_tpl("climate", dps[t_set]['meta'].get('scale', 0))})
                 payload.update({"current_temperature_topic": Config.HA_STATE_TOPIC.format(dev_id, t_cur), "current_temperature_template": get_tpl("climate", dps[t_cur]['meta'].get('scale', 0))})
                 consumed.update([t_set, t_cur])
@@ -213,7 +213,7 @@ class DiscoveryGenerator:
         if CATEGORY_MAP.get(category) == 'fan' or check_signature('fan'):
             sp_dp, sw_dp, osc_dp = find_dp(r'^(fan_speed|fan_mode)$'), find_dp(r'^switch$'), find_dp(r'^fan_horizontal$')
             if sp_dp:
-                payload = {"name": name, "unique_id": f"{dev_id}_fan", "device": common_device, **avail}
+                payload = {"name": None, "unique_id": f"{dev_id}_fan", "device": common_device, **avail}
                 payload.update({"percentage_command_topic": Config.HA_COMMAND_TOPIC.format(dev_id, sp_dp), "percentage_state_topic": Config.HA_STATE_TOPIC.format(dev_id, sp_dp), "percentage_value_template": get_tpl("fan")})
                 consumed.add(sp_dp)
                 if sw_dp:
@@ -228,7 +228,7 @@ class DiscoveryGenerator:
         if CATEGORY_MAP.get(category) == 'light' or check_signature('light'):
             sw_dp, br_dp, tm_dp = find_dp(r'^(switch_led|switch)$'), find_dp(r'^(bright_value|brightness)$'), find_dp(r'^(temp_value|color_temp)$')
             if br_dp:
-                payload = {"name": name, "unique_id": f"{dev_id}_light", "device": common_device, **avail}
+                payload = {"name": None, "unique_id": f"{dev_id}_light", "device": common_device, **avail}
                 payload.update({"brightness_command_topic": Config.HA_COMMAND_TOPIC.format(dev_id, br_dp), "brightness_state_topic": Config.HA_STATE_TOPIC.format(dev_id, br_dp), "brightness_value_template": get_tpl("light")})
                 consumed.add(br_dp)
                 if sw_dp:
