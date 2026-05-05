@@ -237,7 +237,7 @@ class DiscoveryGenerator:
             comp, dev_cls, unit, icon = ent_info
             payload = {"name": str(code).replace("_", " ").capitalize(), "unique_id": f"{dev_id}_{code}", "state_topic": Config.HA_STATE_TOPIC.format(dev_id, d_id), "device": common_device, **avail}
             if dev_cls: payload["device_class"] = dev_cls
-            final_unit = self._normalize_unit(unit or meta.get('unit'), dev_cls)
+            final_unit = self._normalize_unit(meta.get('unit') or unit, dev_cls)
             if final_unit: payload["unit_of_measurement"] = final_unit
             if icon: payload["icon"] = icon
             
