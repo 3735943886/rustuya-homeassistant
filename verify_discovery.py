@@ -2,6 +2,7 @@ import json
 import time
 import logging
 import paho.mqtt.client as mqtt
+import paho.mqtt.publish as publish
 from typing import Dict, Any, List, Set
 from tuya_discovery_generator import initialize_generator, Config as GenConfig
 
@@ -137,8 +138,7 @@ class DiscoveryFixer:
             logger.info(f"Fixing missing discovery for {device.get('name')} ({device.get('id')})...")
             for topic, payload in expected_payloads.items():
                 logger.info(f"  Publishing: {topic}")
-                res = client.publish(topic, json.dumps(payload), retain=True)
-                res.wait_for_publish() # Ensure it's sent
+                publish.single(topic=topic, payload=json.dumps(payload), retain=True)
             client.disconnect()
             print(f"✅ Successfully published {len(expected_payloads)} topics for {device.get('name')}")
         except Exception as e:
