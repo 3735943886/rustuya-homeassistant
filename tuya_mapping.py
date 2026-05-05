@@ -32,6 +32,7 @@ UNIT_NORM_MAP = {
     "s": {"sec", "second", "seconds"},
     "min": {"min", "minute", "minutes"},
     "h": {"h", "hour", "hours"},
+    "m": {"m", "meter", "meters"},
 }
 
 DEFAULT_UNITS_BY_CLASS = {
@@ -43,6 +44,7 @@ DEFAULT_UNITS_BY_CLASS = {
     "current": "A",
     "energy": "kWh",
     "illuminance": "lx",
+    "distance": "m",
 }
 
 # --- DP Code Mapping ---
