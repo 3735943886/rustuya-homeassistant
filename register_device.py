@@ -45,7 +45,7 @@ def main():
         print("\n--- MQTT DISCOVERY PAYLOADS ---")
         import paho.mqtt.publish as publish
         for topic in payloads:
-            publish.single(topic=topic, payload=json.dumps(payloads[topic]))
+            publish.single(topic=topic, payload=json.dumps(payloads[topic]), retain=True)
         print("="*80)
 
     except FileNotFoundError:
