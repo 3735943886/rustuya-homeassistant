@@ -175,7 +175,16 @@ class DiscoveryVerifier:
         print(f"  - Total Expected Topics: {len(self.expected_topics)}")
         print(f"  - Total Received Topics: {len(self.received_messages)}")
         
-        print(f"\n✅ Matches: {len(self.results['matched'])} entities")
+        if self.results["matched"]:
+            matches_by_dev = {}
+            for item in self.results["matched"]:
+                name = item["device"]
+                if name not in matches_by_dev: matches_by_dev[name] = 0
+                matches_by_dev[name] += 1
+            
+            print(f"\n✅ Matches: {len(self.results['matched'])} entities")
+            for name, count in matches_by_dev.items():
+                print(f"  - 📱 {name}: {count} entities matched")
         
         if self.results["mismatched"]:
             print(f"\n❌ Mismatched Devices: {len(self.results['mismatched'])}")
