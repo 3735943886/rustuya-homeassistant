@@ -245,8 +245,13 @@ class DiscoveryGenerator:
             payload["value_template"] = get_tpl(comp, meta.get('scale', 0), meta.get('val_map'))
             
             if comp == "number":
+                scale = meta.get('scale', 0)
                 for k in ['min', 'max', 'step']:
-                    if k in meta: payload[k] = meta[k]
+                    if k in meta:
+                        val = meta[k]
+                        if scale > 0:
+                            val = round(val / (10 ** scale), scale)
+                        payload[k] = val
             elif comp == "select":
                 options = meta.get('options') or meta.get('range')
                 if options:
