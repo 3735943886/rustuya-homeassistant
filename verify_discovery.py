@@ -218,12 +218,36 @@ class DiscoveryVerifierRunner:
         if not self.devices: return
 
         if args.add_missing:
-            device = self.find_device(args.add_missing)
-            if device:
-                self.fixer.fix_missing(device)
+            if args.add_missing == 'INTERACTIVE':
+                # For interactive mode, we need to verify first
+                self.collect_mqtt()
+                categorized = self.verifier.verify(self.devices, self.received_messages)
+                pure_missing = categorized.get('pure_missing', [])
+                
+                if not pure_missing:
+                    print("✨ No 'Pure Missing' devices found to fix.")
+                    return
+                
+                print(f"\n🔍 Found {len(pure_missing)} Pure Missing devices.")
+                for d in pure_missing:
+                    try:
+                        ans = input(f"❓ Fix discovery for {d['name']} ({d['id']})? [Y/n]: ").strip().lower()
+                        if ans in ['', 'y', 'yes']:
+                            # We need the full device object from self.devices for generator
+                            full_device = next((dev for dev in self.devices if dev['id'] == d['id']), None)
+                            if full_device:
+                                self.fixer.fix_missing(full_device)
+                    except KeyboardInterrupt:
+                        print("\nStopping interactive fix.")
+                        break
+                return
             else:
-                print(f"❌ Device '{args.add_missing}' not found in JSON.")
-            return
+                device = self.find_device(args.add_missing)
+                if device:
+                    self.fixer.fix_missing(device)
+                else:
+                    print(f"❌ Device '{args.add_missing}' not found in JSON.")
+                return
 
         # For removal, we need to know which topics are unexpected, so we verify first
         self.collect_mqtt()
