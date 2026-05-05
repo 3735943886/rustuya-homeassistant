@@ -40,11 +40,13 @@ class DiscoveryVerifier:
             dev_name = device.get('name', dev_id)
             device_results[dev_id] = {
                 "id": dev_id, "name": dev_name,
-                "matched": [], "mismatched": [], "missing": [], "unexpected": []
+                "matched": [], "mismatched": [], "missing": [], "unexpected": [],
+                "expected_count": 0
             }
             
             try:
                 expected_payloads, _ = self.generator.generate(device)
+                device_results[dev_id]["expected_count"] = len(expected_payloads)
                 for topic, payload in expected_payloads.items():
                     expected_topics[topic] = {"payload": payload, "device_id": dev_id}
             except Exception as e:
@@ -76,7 +78,7 @@ class DiscoveryVerifier:
                     working_received.remove(topic)
                 elif dev_id != "unknown":
                     if dev_id not in device_results:
-                        device_results[dev_id] = {"id": dev_id, "name": dev_id, "matched": [], "mismatched": [], "missing": [], "unexpected": [topic]}
+                        device_results[dev_id] = {"id": dev_id, "name": dev_id, "matched": [], "mismatched": [], "missing": [], "unexpected": [topic], "expected_count": 0}
                     else:
                         device_results[dev_id]["unexpected"].append(topic)
                     working_received.remove(topic)
@@ -89,7 +91,8 @@ class DiscoveryVerifier:
         # 4. Final Categorization
         categorized = {
             "perfect": [], "mismatched_payload": [], "partially_missing": [],
-            "pure_missing": [], "unexpected_topics": [], "orphans": [], "errors": errors
+            "pure_missing": [], "unexpected_topics": [], "orphans": [], 
+            "no_dp_config": [], "errors": errors
         }
 
         for dev_id, data in device_results.items():
@@ -97,12 +100,18 @@ class DiscoveryVerifier:
             has_mismatched = len(data["mismatched"]) > 0
             has_missing = len(data["missing"]) > 0
             has_unexpected = len(data["unexpected"]) > 0
+            is_known = dev_id in known_device_ids
             
-            if dev_id not in known_device_ids:
+            if not is_known:
                 categorized["orphans"].append(data)
                 continue
 
-            if not has_matched and not has_mismatched and not has_unexpected:
+            if data["expected_count"] == 0:
+                if has_unexpected:
+                    categorized["unexpected_topics"].append(data)
+                else:
+                    categorized["no_dp_config"].append(data)
+            elif not has_matched and not has_mismatched and not has_unexpected:
                 categorized["pure_missing"].append(data)
             elif has_missing and not has_matched and not has_mismatched:
                 categorized["unexpected_topics"].append(data)
