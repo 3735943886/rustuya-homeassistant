@@ -83,7 +83,8 @@ class DiscoveryGenerator:
         source_label = matched_source or "generic"
         
         # 4. Build Entities
-        entities = self._build_entities(device_id, name, category, normalized_dps, info, device.get('function', {}), source_label)
+        parent_id = device.get('parent')
+        entities = self._build_entities(device_id, name, category, normalized_dps, info, device.get('function', {}), source_label, parent_id=parent_id)
         
         return entities, source_label
 
@@ -109,12 +110,13 @@ class DiscoveryGenerator:
             normalized[dp_id] = {"code": code, "type": vtype, "meta": meta, "ent_info": None}
         return normalized
 
-    def _build_entities(self, dev_id: str, name: str, category: str, dps: Dict[str, Any], info: Dict[str, Any], functions: Dict[str, Any], source: str) -> Dict[str, Any]:
+    def _build_entities(self, dev_id: str, name: str, category: str, dps: Dict[str, Any], info: Dict[str, Any], functions: Dict[str, Any], source: str, parent_id: Optional[str] = None) -> Dict[str, Any]:
         results, consumed = {}, set()
         model = info.get('model', category)
         common_device = {"identifiers": [dev_id], "name": name, "manufacturer": Config.DEFAULT_MANUFACTURER, "model": model}
+        avail_id = parent_id or dev_id
         avail = {
-            "availability_topic": Config.HA_ERROR_TOPIC.format(dev_id),
+            "availability_topic": Config.HA_ERROR_TOPIC.format(avail_id),
             "availability_template": "{{ 'online' if value_json is defined and value_json != None and value_json.errorCode | default(-1) == 0 else 'offline' }}",
             "payload_available": "online", "payload_not_available": "offline"
         }
