@@ -167,6 +167,8 @@ class DiscoveryFixer:
         except Exception as e:
             logger.error(f"Failed to remove legacy: {e}")
 
+import fnmatch
+
 class DiscoveryVerifierRunner:
     """CLI Runner for DiscoveryVerifier with Fixing capabilities"""
     def __init__(self):
@@ -182,11 +184,15 @@ class DiscoveryVerifierRunner:
         except Exception as e:
             logger.error(f"Failed to load devices: {e}")
 
-    def find_device(self, search_term: str) -> Dict[str, Any]:
+    def find_devices(self, pattern: str) -> List[Dict[str, Any]]:
+        """Find devices matching a name or ID pattern (supports wildcards)"""
+        matches = []
         for d in self.devices:
-            if d.get('id') == search_term or d.get('name') == search_term:
-                return d
-        return None
+            # Match against ID or Name
+            if fnmatch.fnmatch(d.get('id', ''), pattern) or \
+               fnmatch.fnmatch(d.get('name', ''), pattern):
+                matches.append(d)
+        return matches
 
     def on_connect(self, client, userdata, flags, rc):
         if rc == 0:
@@ -250,12 +256,22 @@ class DiscoveryVerifierRunner:
                     break
             return
 
+        if args.add_missing_all:
+            # ... (unchanged)
+            return
+
         if args.add_missing:
-            device = self.find_device(args.add_missing)
-            if device:
-                self.fixer.fix_missing(device)
-            else:
-                print(f"❌ Device '{args.add_missing}' not found in JSON.")
+            matches = self.find_devices(args.add_missing)
+            if not matches:
+                print(f"❌ No devices matching '{args.add_missing}' found.")
+                return
+            
+            is_bulk = len(matches) > 1 or '*' in args.add_missing or '?' in args.add_missing
+            for d in matches:
+                if is_bulk:
+                    ans = input(f"❓ Fix discovery for {d['name']} ({d['id']})? [Y/n]: ").strip().lower()
+                    if ans not in ['', 'y', 'yes']: continue
+                self.fixer.fix_missing(d)
             return
 
         # For removal, we need to know which topics are unexpected, so we verify first
@@ -263,24 +279,28 @@ class DiscoveryVerifierRunner:
         categorized = self.verifier.verify(self.devices, self.received_messages)
 
         if args.remove_legacy:
-            device = self.find_device(args.remove_legacy)
-            if not device:
-                print(f"❌ Device '{args.remove_legacy}' not found in JSON.")
+            matches = self.find_devices(args.remove_legacy)
+            if not matches:
+                print(f"❌ No devices matching '{args.remove_legacy}' found.")
                 return
-            
-            dev_id = device['id']
-            # Find unexpected topics for this device
-            unexpected = []
-            # Check categorized['unexpected_topics'] and categorized['partially_missing']
-            for cat in ['unexpected_topics', 'partially_missing']:
-                for d in categorized[cat]:
-                    if d['id'] == dev_id:
-                        unexpected.extend(d['unexpected'])
-            
-            if unexpected:
-                self.fixer.remove_legacy(dev_id, unexpected)
-            else:
-                print(f"ℹ️ No unexpected topics found for {device['name']} ({dev_id}).")
+
+            is_bulk = len(matches) > 1 or '*' in args.remove_legacy or '?' in args.remove_legacy
+            for d in matches:
+                dev_id = d['id']
+                # Find unexpected topics for this device
+                unexpected = []
+                for cat in ['unexpected_topics', 'partially_missing']:
+                    for data in categorized[cat]:
+                        if data['id'] == dev_id:
+                            unexpected.extend(data['unexpected'])
+                
+                if unexpected:
+                    if is_bulk:
+                        ans = input(f"❓ Remove {len(unexpected)} legacy topics for {d['name']} ({dev_id})? [Y/n]: ").strip().lower()
+                        if ans not in ['', 'y', 'yes']: continue
+                    self.fixer.remove_legacy(dev_id, unexpected)
+                elif not is_bulk:
+                    print(f"ℹ️ No unexpected topics found for {d['name']} ({dev_id}).")
             return
 
         # Default: Print summary
