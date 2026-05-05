@@ -99,7 +99,6 @@ DP_CODE_MAP = {
     "switch_type": ("select", None, None, "mdi:toggle-switch-outline"),
     "work_state": ("sensor", None, None, "mdi:run"),
     "alarm_active": ("binary_sensor", "safety", None, "mdi:alert"),
-    "sensitivity": ("select", None, None, "mdi:tune"),
     "countdown_1": ("number", None, "s", "mdi:timer-sand"),
     "countdown_2": ("number", None, "s", "mdi:timer-sand"),
     "countdown_3": ("number", None, "s", "mdi:timer-sand"),
