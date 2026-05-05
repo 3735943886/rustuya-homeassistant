@@ -313,6 +313,11 @@ class DiscoveryVerifierRunner:
                 status = "Legacy topics only" if not d['matched'] and not d['mismatched'] else "Extra topics found"
                 print(f"  - 📱 {d['name']} ({d['id']}): {len(d['unexpected'])} unexpected topics ({status})")
 
+        if categorized["no_dp_config"]:
+            print(f"\n⚪ No DP Configured (No Discovery Expected): {len(categorized['no_dp_config'])}")
+            for d in categorized["no_dp_config"]:
+                print(f"  - 📱 {d['name']} ({d['id']})")
+
         if categorized["pure_missing"]:
             print(f"\n🚫 Pure Missing: {len(categorized['pure_missing'])}")
             for d in categorized["pure_missing"]:
