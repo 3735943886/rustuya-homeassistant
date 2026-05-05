@@ -126,12 +126,12 @@ class DiscoveryGenerator:
             return None
 
         def get_tpl(comp, scale=0, val_map=None):
-            guard = "value_json is defined and value_json != None"
+            guard = "value_json is defined and value_json != None and value_json.value != None"
             if comp == "event": 
                 return "{{ { \"event_type\": value_json.value } | to_json if %s and value_json.type | default('') == 'active' else '' }}" % guard
             
             if comp in ["binary_sensor", "switch"] and not val_map:
-                return "{{ 'true' if %s and value_json.value | default(false) else 'false' }}" % guard
+                return "{{ 'true' if %s and value_json.value == true else 'false' if %s and value_json.value == false else 'unknown' }}" % (guard, guard)
 
             base = "value_json.value"
             if scale > 0:
@@ -146,7 +146,7 @@ class DiscoveryGenerator:
             else:
                 final_expr = expr
                 
-            return "{{ %s if %s else '' }}" % (final_expr, guard)
+            return "{{ %s if %s else 'unknown' }}" % (final_expr, guard)
 
         def check_signature(comp_type):
             sig = COMPLEX_SIGNATURES.get(comp_type)
