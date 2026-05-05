@@ -137,7 +137,8 @@ class DiscoveryFixer:
             logger.info(f"Fixing missing discovery for {device.get('name')} ({device.get('id')})...")
             for topic, payload in expected_payloads.items():
                 logger.info(f"  Publishing: {topic}")
-                client.publish(topic, json.dumps(payload), retain=True)
+                res = client.publish(topic, json.dumps(payload), retain=True)
+                res.wait_for_publish() # Ensure it's sent
             client.disconnect()
             print(f"✅ Successfully published {len(expected_payloads)} topics for {device.get('name')}")
         except Exception as e:
