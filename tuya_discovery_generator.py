@@ -35,12 +35,11 @@ class DiscoveryGenerator:
         self.converter = converter or ExternalConverter()
 
     def _normalize_unit(self, unit: Optional[str], device_class: Optional[str] = None) -> Optional[str]:
-        if not unit: return DEFAULT_UNITS_BY_CLASS.get(device_class)
+        if not unit: return None
         u_lower = unit.lower().strip()
         for standard, aliases in UNIT_NORM_MAP.items():
             if u_lower == standard.lower() or u_lower in aliases: return standard
-        if device_class in DEFAULT_UNITS_BY_CLASS and len(unit) > 5: return DEFAULT_UNITS_BY_CLASS[device_class]
-        return unit
+        return None
 
     def generate(self, device: Dict[str, Any]) -> Tuple[Dict[str, Any], str]:
         device_id, product_id = device['id'], device.get('product_id')
@@ -237,7 +236,7 @@ class DiscoveryGenerator:
             comp, dev_cls, unit, icon = ent_info
             payload = {"name": str(code).replace("_", " ").capitalize(), "unique_id": f"{dev_id}_{code}", "state_topic": Config.HA_STATE_TOPIC.format(dev_id, d_id), "device": common_device, **avail}
             if dev_cls: payload["device_class"] = dev_cls
-            final_unit = self._normalize_unit(meta.get('unit') or unit, dev_cls)
+            final_unit = self._normalize_unit(meta.get('unit'), dev_cls) or self._normalize_unit(unit, dev_cls) or DEFAULT_UNITS_BY_CLASS.get(dev_cls)
             if final_unit: payload["unit_of_measurement"] = final_unit
             if icon: payload["icon"] = icon
             
