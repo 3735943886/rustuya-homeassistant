@@ -226,7 +226,7 @@ class DiscoveryVerifier:
                 print(f"  - 📱 {d['name']} ({d['id']})")
 
         if self.categorized["orphans"]:
-            print(f"\n👻 Orphaned (Topic found but Device ID not in JSON): {len(self.categorized['orphans'])}")
+            print(f"\n👻 Orphaned or External (Topic found but Device ID not in JSON): {len(self.categorized['orphans'])}")
             for d in self.categorized["orphans"]:
                 topics_count = len(d.get('topics', d.get('unexpected', [])))
                 print(f"  - ❓ {d['id']}: {topics_count} topics")
