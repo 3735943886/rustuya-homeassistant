@@ -23,8 +23,8 @@ class DiscoveryVerifier:
         self.expected_topics: Dict[str, Dict[str, Any]] = {}
         self.results = {
             "matched": [],
-            "mismatched": [],
-            "missing_in_mqtt": [],
+            "mismatched": {}, # device_id -> {name, entities: []}
+            "missing_in_mqtt": {}, # device_id -> {name, entities: []}
             "missing_in_json": [],
             "errors": []
         }
@@ -79,27 +79,27 @@ class DiscoveryVerifier:
         except Exception as e:
             logger.error(f"MQTT Error: {e}")
             self.results["errors"].append(f"MQTT connection failed: {e}")
-            return
+            # Continue to show what we have in JSON even if MQTT failed?
+            # No, we need MQTT to verify.
 
         self.verify()
         self.print_summary()
 
     def verify(self):
         # 1. Generate expected topics from JSON
-        device_ids_in_json = set()
         for device in self.devices:
             device_id = device.get('id')
             if not device_id:
                 continue
-            device_ids_in_json.add(device_id)
             
+            device_name = device.get('name', device_id)
             try:
                 expected_payloads, source = self.generator.generate(device)
                 for topic, payload in expected_payloads.items():
                     self.expected_topics[topic] = {
                         "payload": payload,
                         "device_id": device_id,
-                        "device_name": device.get('name', device_id)
+                        "device_name": device_name
                     }
             except Exception as e:
                 logger.error(f"Error generating discovery for device {device_id}: {e}")
@@ -109,33 +109,34 @@ class DiscoveryVerifier:
         received_topics = set(self.received_messages.keys())
         expected_topics_set = set(self.expected_topics.keys())
 
-        # Check Matches and Mismatches
         for topic in expected_topics_set:
             info = self.expected_topics[topic]
+            dev_id = info["device_id"]
+            dev_name = info["device_name"]
+
             if topic in received_topics:
                 actual = self.received_messages[topic]["payload"]
                 expected = info["payload"]
                 
-                # Compare payloads (normalization)
                 if self.compare_payloads(actual, expected):
                     self.results["matched"].append({
                         "topic": topic,
-                        "device": info["device_name"],
+                        "device": dev_name,
                         "retain": self.received_messages[topic]["retain"]
                     })
                 else:
-                    self.results["mismatched"].append({
+                    if dev_id not in self.results["mismatched"]:
+                        self.results["mismatched"][dev_id] = {"name": dev_name, "entities": []}
+                    self.results["mismatched"][dev_id]["entities"].append({
                         "topic": topic,
-                        "device": info["device_name"],
                         "actual": actual,
                         "expected": expected
                     })
                 received_topics.remove(topic)
             else:
-                self.results["missing_in_mqtt"].append({
-                    "topic": topic,
-                    "device": info["device_name"]
-                })
+                if dev_id not in self.results["missing_in_mqtt"]:
+                    self.results["missing_in_mqtt"][dev_id] = {"name": dev_name, "entities": []}
+                self.results["missing_in_mqtt"][dev_id]["entities"].append(topic)
 
         # 3. Check for topics in MQTT that are not in JSON (orphans)
         for topic in received_topics:
@@ -145,9 +146,6 @@ class DiscoveryVerifier:
             })
 
     def compare_payloads(self, actual: Dict[str, Any], expected: Dict[str, Any]) -> bool:
-        # Simple JSON comparison
-        # We might want to be more sophisticated if some fields are dynamic,
-        # but DiscoveryGenerator should be deterministic.
         return actual == expected
 
     def print_summary(self):
@@ -160,25 +158,43 @@ class DiscoveryVerifier:
         print(f"  - Total Expected Topics: {len(self.expected_topics)}")
         print(f"  - Total Received Topics: {len(self.received_messages)}")
         
-        print(f"\n✅ Matches: {len(self.results['matched'])}")
-        # Optional: print matches if small?
+        print(f"\n✅ Matches: {len(self.results['matched'])} entities")
         
         if self.results["mismatched"]:
-            print(f"\n❌ Mismatches: {len(self.results['mismatched'])}")
-            for item in self.results["mismatched"]:
-                print(f"  - Topic: {item['topic']}")
-                print(f"    Device: {item['device']}")
-                # print(f"    Difference details could be added here")
+            print(f"\n❌ Mismatched Devices: {len(self.results['mismatched'])}")
+            for dev_id, data in self.results["mismatched"].items():
+                print(f"  - 📱 {data['name']} ({dev_id})")
+                for ent in data["entities"]:
+                    print(f"    - Mismatch in: {ent['topic']}")
 
         if self.results["missing_in_mqtt"]:
-            print(f"\n⚠️ Discovery Missing in MQTT (Expected but not found): {len(self.results['missing_in_mqtt'])}")
-            for item in self.results["missing_in_mqtt"]:
-                print(f"  - Topic: {item['topic']} ({item['device']})")
+            print(f"\n⚠️ Missing Discovery (Devices with missing entities): {len(self.results['missing_in_mqtt'])}")
+            for dev_id, data in self.results["missing_in_mqtt"].items():
+                count = len(data["entities"])
+                print(f"  - 📱 {data['name']} ({dev_id}): {count} entities missing")
+                # Optional: list them if count is small?
+                if count <= 3:
+                    for t in data["entities"]:
+                        print(f"    - {t}")
+                else:
+                    print(f"    - ... and {count-3} more")
 
         if self.results["missing_in_json"]:
-            print(f"\n👻 Discovery Orphaned in MQTT (Found but not in JSON): {len(self.results['missing_in_json'])}")
+            print(f"\n👻 Orphaned Discovery (MQTT topics not in JSON): {len(self.results['missing_in_json'])}")
+            # Group orphans by device ID if possible
+            orphans_by_dev = {}
             for item in self.results["missing_in_json"]:
-                print(f"  - Topic: {item['topic']}")
+                topic = item["topic"]
+                # Try to extract device ID from topic or payload
+                payload = item["payload"]
+                dev_info = payload.get("device", {})
+                ids = dev_info.get("identifiers", [])
+                dev_id = ids[0] if ids else "unknown"
+                if dev_id not in orphans_by_dev: orphans_by_dev[dev_id] = []
+                orphans_by_dev[dev_id].append(topic)
+            
+            for dev_id, topics in orphans_by_dev.items():
+                print(f"  - ❓ {dev_id}: {len(topics)} orphaned topics")
 
         if self.results["errors"]:
             print(f"\n❗ Errors encountered: {len(self.results['errors'])}")
@@ -187,12 +203,11 @@ class DiscoveryVerifier:
 
         print("\n" + "="*60)
         
-        # Summary line for quick reading
         total_issues = len(self.results["mismatched"]) + len(self.results["missing_in_mqtt"]) + len(self.results["missing_in_json"])
         if total_issues == 0:
             print("✨ Everything is consistent!")
         else:
-            print(f"🚨 Found {total_issues} issues that need attention.")
+            print(f"🚨 Found {total_issues} devices/groups with issues.")
         print("="*60 + "\n")
 
 if __name__ == "__main__":
