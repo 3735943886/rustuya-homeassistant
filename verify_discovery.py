@@ -225,7 +225,3 @@ class DiscoveryVerifierRunner:
 if __name__ == "__main__":
     runner = DiscoveryVerifierRunner()
     runner.run()
-
-if __name__ == "__main__":
-    verifier = DiscoveryVerifier()
-    verifier.run()
