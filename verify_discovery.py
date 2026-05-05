@@ -86,81 +86,109 @@ class DiscoveryVerifier:
         self.print_summary()
 
     def verify(self):
-        # 1. Generate expected topics from JSON
+        # 1. Initialize device results map
+        device_results = {} # dev_id -> {name, matched: [], mismatched: [], missing: [], unexpected: []}
         known_device_ids = set()
+        
         for device in self.devices:
-            device_id = device.get('id')
-            if not device_id: continue
-            known_device_ids.add(device_id)
+            dev_id = device.get('id')
+            if not dev_id: continue
+            known_device_ids.add(dev_id)
+            dev_name = device.get('name', dev_id)
+            device_results[dev_id] = {
+                "name": dev_name,
+                "matched": [], "mismatched": [], "missing": [], "unexpected": []
+            }
             
-            device_name = device.get('name', device_id)
             try:
-                expected_payloads, source = self.generator.generate(device)
+                expected_payloads, _ = self.generator.generate(device)
                 for topic, payload in expected_payloads.items():
                     self.expected_topics[topic] = {
                         "payload": payload,
-                        "device_id": device_id,
-                        "device_name": device_name
+                        "device_id": dev_id
                     }
             except Exception as e:
-                logger.error(f"Error generating discovery for device {device_id}: {e}")
-                self.results["errors"].append(f"Generation error ({device_id}): {e}")
+                self.results["errors"].append(f"Generation error ({dev_id}): {e}")
 
-        # 2. Compare Expected vs Received
+        # 2. Process all received MQTT topics
         received_topics = set(self.received_messages.keys())
-        expected_topics_set = set(self.expected_topics.keys())
-
-        for topic in expected_topics_set:
-            info = self.expected_topics[topic]
-            dev_id = info["device_id"]
-            dev_name = info["device_name"]
-
-            if topic in received_topics:
-                actual = self.received_messages[topic]["payload"]
-                expected = info["payload"]
-                
-                if self.compare_payloads(actual, expected):
-                    self.results["matched"].append({
-                        "topic": topic,
-                        "device": dev_name,
-                        "retain": self.received_messages[topic]["retain"]
-                    })
-                else:
-                    if dev_id not in self.results["mismatched"]:
-                        self.results["mismatched"][dev_id] = {"name": dev_name, "entities": []}
-                    self.results["mismatched"][dev_id]["entities"].append({
-                        "topic": topic,
-                        "actual": actual,
-                        "expected": expected
-                    })
-                received_topics.remove(topic)
-            else:
-                if dev_id not in self.results["missing_in_mqtt"]:
-                    self.results["missing_in_mqtt"][dev_id] = {"name": dev_name, "entities": []}
-                self.results["missing_in_mqtt"][dev_id]["entities"].append(topic)
-
-        # 3. Check for topics in MQTT that are not expected
-        self.results["unexpected_topics"] = {} # dev_id -> {name, topics: [], in_json: bool}
-        
-        for topic in received_topics:
+        for topic in list(received_topics):
             payload = self.received_messages[topic]["payload"]
             dev_info = payload.get("device", {})
             ids = dev_info.get("identifiers", [])
             dev_id = ids[0] if ids else "unknown"
             
-            in_json = dev_id in known_device_ids
+            if topic in self.expected_topics:
+                expected_info = self.expected_topics[topic]
+                expected_payload = expected_info["payload"]
+                target_dev_id = expected_info["device_id"]
+                
+                if self.compare_payloads(payload, expected_payload):
+                    device_results[target_dev_id]["matched"].append(topic)
+                else:
+                    device_results[target_dev_id]["mismatched"].append({
+                        "topic": topic, "actual": payload, "expected": expected_payload
+                    })
+                received_topics.remove(topic)
+            else:
+                # Unexpected topic
+                if dev_id in device_results:
+                    device_results[dev_id]["unexpected"].append(topic)
+                    received_topics.remove(topic)
+                elif dev_id == "unknown":
+                    # Keep in received_topics to handle as true orphans later
+                    pass
+                else:
+                    # Known device but not in our results map (shouldn't happen if loaded correctly)
+                    if dev_id not in device_results:
+                        device_results[dev_id] = {"name": dev_id, "matched": [], "mismatched": [], "missing": [], "unexpected": [topic]}
+                    else:
+                        device_results[dev_id]["unexpected"].append(topic)
+                    received_topics.remove(topic)
+
+        # 3. Identify missing topics
+        for topic, info in self.expected_topics.items():
+            dev_id = info["device_id"]
+            if topic not in self.received_messages:
+                device_results[dev_id]["missing"].append(topic)
+
+        # 4. Final Categorization
+        self.categorized = {
+            "perfect": [],
+            "mismatched_payload": [],
+            "partially_missing": [],
+            "pure_missing": [],
+            "unexpected_topics": [],
+            "orphans": [] # Devices not in JSON
+        }
+
+        for dev_id, data in device_results.items():
+            has_matched = len(data["matched"]) > 0
+            has_mismatched = len(data["mismatched"]) > 0
+            has_missing = len(data["missing"]) > 0
+            has_unexpected = len(data["unexpected"]) > 0
             
-            if dev_id not in self.results["unexpected_topics"]:
-                # Try to find name if it's in JSON
-                name = dev_id
-                if in_json:
-                    for d in self.devices:
-                        if d.get('id') == dev_id:
-                            name = d.get('name', dev_id)
-                            break
-                self.results["unexpected_topics"][dev_id] = {"name": name, "topics": [], "in_json": in_json}
-            
-            self.results["unexpected_topics"][dev_id]["topics"].append(topic)
+            if dev_id not in known_device_ids:
+                self.categorized["orphans"].append({**data, "id": dev_id})
+                continue
+
+            if not has_matched and not has_mismatched and not has_unexpected:
+                self.categorized["pure_missing"].append({**data, "id": dev_id})
+            elif has_missing and not has_matched and not has_mismatched:
+                # Has unexpected but no expected matched -> Misconfigured
+                self.categorized["unexpected_topics"].append({**data, "id": dev_id})
+            elif has_missing:
+                self.categorized["partially_missing"].append({**data, "id": dev_id})
+            elif has_mismatched:
+                self.categorized["mismatched_payload"].append({**data, "id": dev_id})
+            elif has_unexpected:
+                self.categorized["unexpected_topics"].append({**data, "id": dev_id})
+            else:
+                self.categorized["perfect"].append({**data, "id": dev_id})
+
+        # True orphans (topics with no device ID or unknown device ID)
+        for topic in received_topics:
+            self.categorized["orphans"].append({"id": "unknown", "name": "Unknown", "topics": [topic]})
 
     def compare_payloads(self, actual: Dict[str, Any], expected: Dict[str, Any]) -> bool:
         return actual == expected
@@ -170,48 +198,36 @@ class DiscoveryVerifier:
         print("         MQTT DISCOVERY VERIFICATION SUMMARY")
         print("="*60)
         
-        print(f"\n📊 Statistics:")
+        print(f"\n📊 Overall Stats:")
         print(f"  - Devices in JSON: {len(self.devices)}")
-        print(f"  - Total Expected Topics: {len(self.expected_topics)}")
-        print(f"  - Total Received Topics: {len(self.received_messages)}")
+        print(f"  - Perfect Matches: {len(self.categorized['perfect'])}")
         
-        if self.results["matched"]:
-            matches_by_dev = {}
-            for item in self.results["matched"]:
-                name = item["device"]
-                if name not in matches_by_dev: matches_by_dev[name] = 0
-                matches_by_dev[name] += 1
-            
-            print(f"\n✅ Matches: {len(self.results['matched'])} entities")
-            for name, count in matches_by_dev.items():
-                print(f"  - 📱 {name}: {count} entities matched")
-        
-        if self.results["mismatched"]:
-            print(f"\n❌ Mismatched Devices: {len(self.results['mismatched'])}")
-            for dev_id, data in self.results["mismatched"].items():
-                print(f"  - 📱 {data['name']} ({dev_id})")
-                for ent in data["entities"]:
-                    print(f"    - Mismatch in: {ent['topic']}")
+        if self.categorized["mismatched_payload"]:
+            print(f"\n❌ Payload Mismatch (Content differs): {len(self.categorized['mismatched_payload'])}")
+            for d in self.categorized["mismatched_payload"]:
+                print(f"  - 📱 {d['name']} ({d['id']}): {len(d['mismatched'])} entities differ")
 
-        if self.results["missing_in_mqtt"]:
-            print(f"\n⚠️ Missing Discovery (Devices with missing entities): {len(self.results['missing_in_mqtt'])}")
-            for dev_id, data in self.results["missing_in_mqtt"].items():
-                count = len(data["entities"])
-                print(f"  - 📱 {data['name']} ({dev_id}): {count} entities missing")
+        if self.categorized["partially_missing"]:
+            print(f"\n⚠️ Partially Missing (Some entities missing): {len(self.categorized['partially_missing'])}")
+            for d in self.categorized["partially_missing"]:
+                print(f"  - 📱 {d['name']} ({d['id']}): {len(d['missing'])} missing / {len(d['matched'])} matched")
 
-        if self.results["unexpected_topics"]:
-            orphans = {k: v for k, v in self.results["unexpected_topics"].items() if not v["in_json"]}
-            unexpected = {k: v for k, v in self.results["unexpected_topics"].items() if v["in_json"]}
-            
-            if orphans:
-                print(f"\n👻 Orphaned Discovery (Device ID NOT in JSON): {len(orphans)}")
-                for dev_id, data in orphans.items():
-                    print(f"  - ❓ {dev_id}: {len(data['topics'])} topics")
-            
-            if unexpected:
-                print(f"\n♻️ Legacy/Unexpected Discovery (Device ID in JSON, but topic unexpected): {len(unexpected)}")
-                for dev_id, data in unexpected.items():
-                    print(f"  - 📱 {data['name']} ({dev_id}): {len(data['topics'])} extra topics")
+        if self.categorized["unexpected_topics"]:
+            print(f"\n♻️ Unexpected Topics / Misconfigured: {len(self.categorized['unexpected_topics'])}")
+            for d in self.categorized["unexpected_topics"]:
+                status = "Legacy topics only" if not d['matched'] and not d['mismatched'] else "Extra topics found"
+                print(f"  - 📱 {d['name']} ({d['id']}): {len(d['unexpected'])} unexpected topics ({status})")
+
+        if self.categorized["pure_missing"]:
+            print(f"\n🚫 Pure Missing (No discovery found at all): {len(self.categorized['pure_missing'])}")
+            for d in self.categorized["pure_missing"]:
+                print(f"  - 📱 {d['name']} ({d['id']})")
+
+        if self.categorized["orphans"]:
+            print(f"\n👻 Orphaned (Topic found but Device ID not in JSON): {len(self.categorized['orphans'])}")
+            for d in self.categorized["orphans"]:
+                topics_count = len(d.get('topics', d.get('unexpected', [])))
+                print(f"  - ❓ {d['id']}: {topics_count} topics")
 
         if self.results["errors"]:
             print(f"\n❗ Errors encountered: {len(self.results['errors'])}")
@@ -219,12 +235,13 @@ class DiscoveryVerifier:
                 print(f"  - {err}")
 
         print("\n" + "="*60)
+        total_issues = len(self.categorized["mismatched_payload"]) + len(self.categorized["partially_missing"]) + \
+                       len(self.categorized["unexpected_topics"]) + len(self.categorized["pure_missing"])
         
-        total_issues = len(self.results["mismatched"]) + len(self.results["missing_in_mqtt"]) + len(self.results["unexpected_topics"])
         if total_issues == 0:
             print("✨ Everything is consistent!")
         else:
-            print(f"🚨 Found {total_issues} devices/groups with issues.")
+            print(f"🚨 Found {total_issues} devices with issues.")
         print("="*60 + "\n")
 
 if __name__ == "__main__":
