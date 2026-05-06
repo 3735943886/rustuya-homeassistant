@@ -272,12 +272,10 @@ class DiscoveryGenerator:
                         if scale > 0:
                             val = round(val / (10 ** scale), scale)
                         payload[k] = val
-            elif comp in ["select", "sensor"]:
+            elif comp == "select":
                 options = meta.get('options') or meta.get('range')
                 if options:
                     payload["options"] = options
-                    if comp == "sensor" and vtype == "Enum":
-                        payload["device_class"] = "enum"
             elif comp == "event":
                 event_types = meta.get('options') or meta.get('range')
                 if event_types:
