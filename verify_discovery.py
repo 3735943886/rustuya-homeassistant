@@ -208,7 +208,12 @@ class DiscoveryManager:
             print(f"\n{icon} {cat.replace('_', ' ').title()}: {count}")
             for d in results[cat][:15]: # Show first 15
                 name = d.get('name', 'Unknown')
-                info = f"({len(d.get('missing',[]))} missing / {len(d.get('matched',[]))} matched)" if 'missing' in d else ""
+                parts = []
+                if d.get('missing'): parts.append(f"{len(d['missing'])} missing")
+                if d.get('mismatched'): parts.append(f"{len(d['mismatched'])} mismatched")
+                if d.get('matched'): parts.append(f"{len(d['matched'])} matched")
+                if d.get('unexpected'): parts.append(f"{len(d['unexpected'])} unexpected")
+                info = f"({', '.join(parts)})" if parts else ""
                 print(f"  - {name} ({d.get('id', 'unknown')}) {info}")
             if count > 15: print(f"  ... and {count-15} more")
 
