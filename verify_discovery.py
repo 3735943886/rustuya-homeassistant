@@ -12,7 +12,7 @@ from tuya_discovery_generator import initialize_generator
 BROKER_HOST = "localhost"
 BROKER_PORT = 1883
 HA_PREFIX = "homeassistant"
-WAIT_TIME = 2.5
+WAIT_TIME = 1
 DEVICES_JSON = "tuyadevices.json"
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -119,13 +119,13 @@ class DiscoveryManager:
 
     def collect_mqtt(self):
         """Collect discovery messages from broker"""
-        client = mqtt.Client()
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
         def on_msg(c, u, m):
             if m.topic.endswith("/config"):
                 try: self.mqtt_data[m.topic] = {"payload": json.loads(m.payload), "retain": m.retain}
                 except: pass
         
-        client.on_connect = lambda c, u, f, rc: c.subscribe(f"{HA_PREFIX}/#") if rc==0 else None
+        client.on_connect = lambda c, u, f, rc, p: c.subscribe(f"{HA_PREFIX}/#") if rc==0 else None
         client.on_message = on_msg
         client.connect(BROKER_HOST, BROKER_PORT)
         client.loop_start()
