@@ -124,5 +124,27 @@
       "bright_value": {},
       "temp_value": {}
     }
+  },
+  {
+    "id": "synth_contact_01",
+    "name": "synth_door_sensor",
+    "category": "mcs",
+    "product_id": "synth_mcs_001",
+    "product_name": "Synthetic Door Sensor",
+    "parent": "synth_gateway_001",
+    "function": {},
+    "local_strategy": {
+      "101": {
+        "status_code": "switch",
+        "config_item": {"valueType": "Boolean"}
+      },
+      "103": {
+        "status_code": "battery",
+        "config_item": {
+          "valueType": "Integer",
+          "valueDesc": {"min": 0, "max": 500, "scale": 0, "step": 1}
+        }
+      }
+    }
   }
 ]

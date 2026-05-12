@@ -61,6 +61,55 @@
     "product_id": "synth_wk_002",
     "source": "generic"
   },
+  "synth_contact_01": {
+    "category": "mcs",
+    "name": "synth_door_sensor",
+    "payloads": {
+      "homeassistant/binary_sensor/synth_contact_01_switch/config": {
+        "availability_template": "{{ 'offline' if value_json is defined and value_json != None and value_json.errorCode in [901, 905, 914] else 'online' }}",
+        "availability_topic": "rustuya/error/synth_gateway_001",
+        "device": {
+          "identifiers": [
+            "synth_contact_01"
+          ],
+          "manufacturer": "rustuya",
+          "model": "Synthetic Door Sensor",
+          "name": "synth_door_sensor"
+        },
+        "device_class": "door",
+        "name": "Switch",
+        "payload_available": "online",
+        "payload_not_available": "offline",
+        "payload_off": "false",
+        "payload_on": "true",
+        "state_topic": "rustuya/event/synth_contact_01/101",
+        "unique_id": "synth_contact_01_switch",
+        "value_template": "{{ 'true' if value_json is defined and value_json != None and value_json.value != None and value_json.value == true else 'false' if value_json is defined and value_json != None and value_json.value != None and value_json.value == false else 'unknown' }}"
+      },
+      "homeassistant/sensor/synth_contact_01_battery/config": {
+        "availability_template": "{{ 'offline' if value_json is defined and value_json != None and value_json.errorCode in [901, 905, 914] else 'online' }}",
+        "availability_topic": "rustuya/error/synth_gateway_001",
+        "device": {
+          "identifiers": [
+            "synth_contact_01"
+          ],
+          "manufacturer": "rustuya",
+          "model": "Synthetic Door Sensor",
+          "name": "synth_door_sensor"
+        },
+        "device_class": "battery",
+        "name": "Battery",
+        "payload_available": "online",
+        "payload_not_available": "offline",
+        "state_topic": "rustuya/event/synth_contact_01/103",
+        "unique_id": "synth_contact_01_battery",
+        "unit_of_measurement": "%",
+        "value_template": "{{ value_json.value if value_json is defined and value_json != None and value_json.value != None else 'unknown' }}"
+      }
+    },
+    "product_id": "synth_mcs_001",
+    "source": "generic"
+  },
   "synth_fan_01": {
     "category": "fs",
     "name": "synth_fan_basic",

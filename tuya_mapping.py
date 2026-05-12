@@ -105,7 +105,49 @@ DP_CODE_MAP = {
     "far_detection": ("number", None, "m", "mdi:magnify-minus"),
 }
 
+# --- Tuya Category Reference ---
+# Tuya 공식 카테고리 코드 → 설명 (developer.tuya.com 기준).
+# 이 dict은 단순 참조용. 실제 HA 도메인 라우팅은 아래 CATEGORY_MAP이 담당.
+# 새 카테고리 디바이스 만났을 때 의미 빠르게 확인하고, 핸들러 만들 가치 있다고 판단되면
+# CATEGORY_MAP에 의도적으로 추가하는 흐름.
+TUYA_CATEGORIES = {
+    'cjkg':   'Scene switch',
+    'ckqdkg': 'Hotel key card switch',
+    'cl':     'Window covers',
+    'clkg':   'Curtain switch',
+    'co2bj':  'CO2 sensor',
+    'cobj':   'CO sensor',
+    'cz':     'Socket',
+    'dc':     'String lights',
+    'dd':     'Strip lights',
+    'dj':     'Light source',
+    'dlq':    'Circuit breaker',
+    'dr':     'Electric blanket',
+    'fwd':    'Ambiance light',
+    'gyd':    'Motion sensor light',
+    'hps':    'Human presence sensor',
+    'kg':     'Switch',
+    'mcs':    'Contact sensor',
+    'pir':    'PIR sensor',
+    'pm2.5':  'PM2.5 sensor',
+    'rqbj':   'Gas detector',
+    'sgbj':   'Siren alarm',
+    'sj':     'Water leak detector',
+    'sos':    'Emergency button',
+    'tgkg':   'Dimmer switch',
+    'tgq':    'Dimmer',
+    'wsdcg':  'Temperature and humidity sensor',
+    'xdd':    'Ceiling light',
+    'ywbj':   'Smoke detector',
+    'zd':     'Vibration sensor',
+}
+
 # --- Category Mapping (Tuya Category -> HA Domain) ---
+# 실제 HA 도메인 라우팅 dict. 여기 등록된 카테고리만 _build_entities의 cover/climate/
+# fan/light 전용 핸들러 또는 GENERIC_MAP의 카테고리별 오버라이드를 받음.
+# 등록되지 않은 카테고리는 generic individual DP 처리로 폴백.
+# TUYA_CATEGORIES에는 있지만 여기 없는 카테고리(예: cjkg, ckqdkg, dlq, pir 등)는
+# 의도적으로 미등록 — 적절한 매핑이 명확해질 때까지 generic 폴백으로 처리.
 CATEGORY_MAP = {
     # Cover / Curtain
     'cl': 'cover', 'clkg': 'cover', 'mc': 'cover', 'rs': 'cover', 'jdcljqr': 'cover',
@@ -150,6 +192,11 @@ GENERIC_MAP = {
     "kg": {"default_bool": ("switch", "switch", None, None)},
     "cz": {"default_bool": ("switch", "outlet", None, None)},
     "pc": {"default_bool": ("switch", "outlet", None, None)},
+    # mcs (Contact sensor): 일부 디바이스가 'switch' 코드로 contact 상태를 보고함
+    # (예: Door Sensor, product_id 7jIGJAymiH8OsFFb).
+    # DP_CODE_MAP['switch']가 controllable switch로 매핑되는데 mcs에서는
+    # read-only binary_sensor가 맞으므로 카테고리 단위로 오버라이드.
+    "mcs": {"switch": ("binary_sensor", "door", None, None)},
 }
 
 # --- Herdsman Property Map (Property Name -> HA Entity Info) ---
