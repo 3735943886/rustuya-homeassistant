@@ -10,12 +10,15 @@ Three subcommands:
     python3 verify_discovery.py publish [PATTERN]     # clear stale + publish current
     python3 verify_discovery.py publish 'Door*' -y
     python3 verify_discovery.py publish '*' --dry-run
+    python3 verify_discovery.py publish '*' -c mismatched   # only mismatched devices
 
     python3 verify_discovery.py clear [PATTERN]       # clear ALL topics for matches
     python3 verify_discovery.py clear 'Door*' --stale-only
     python3 verify_discovery.py clear '*' -y
 
 PATTERN is fnmatch on device id or name (default '*' = all).
+-c/--category (repeatable) narrows matches to one of:
+    mismatched, partial, pure, no-dp, unexpected, perfect
 `publish` always clears stale topics first (topics for matching device-id no
 longer produced by generator), then publishes current generator output. Both
 happen in a single MQTT connection via publish.multiple.
@@ -38,6 +41,35 @@ BROKER_PORT = 1883
 HA_PREFIX = "homeassistant"
 COLLECT_WAIT = 1.0
 DEVICES_JSON = "tuyadevices.json"
+
+CATEGORY_ALIASES = {
+    "mismatched": "mismatched_payload",
+    "partial": "partially_missing",
+    "pure": "pure_missing",
+    "no-dp": "no_dp_config",
+    "unexpected": "unexpected_topics",
+    "perfect": "perfect",
+}
+
+
+def filter_matches_by_categories(matches, results, categories):
+    """Narrow `matches` (list of device dicts) to those in any requested category."""
+    if not categories:
+        return matches
+    cat_keys = [CATEGORY_ALIASES[c] for c in categories]
+    allowed_ids = {d['id'] for k in cat_keys for d in results.get(k, [])}
+    return [m for m in matches if m['id'] in allowed_ids]
+
+
+def filter_status_results(results, categories):
+    """Blank out result lists not in the requested categories. `errors` is preserved."""
+    if not categories:
+        return results
+    cat_keys = {CATEGORY_ALIASES[c] for c in categories}
+    return {
+        k: (v if (not isinstance(v, list) or k in cat_keys or k == "errors") else [])
+        for k, v in results.items()
+    }
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
 logger = logging.getLogger("verify_discovery")
@@ -172,20 +204,31 @@ class DiscoveryManager:
 
     # --- Commands ---
 
-    def cmd_status(self, detail: bool = False, pattern: str = "*"):
+    def cmd_status(self, detail: bool = False, pattern: str = "*", categories=None):
         self.load_config()
         self.collect_mqtt()
         results = self.verifier.verify(self.devices, self.mqtt_data)
+        results = filter_status_results(results, categories)
         self._print_summary(results)
         if detail:
             self._print_mismatch_details(results, pattern)
 
-    def cmd_publish(self, pattern: str, yes: bool, dry_run: bool):
+    def cmd_publish(self, pattern: str, yes: bool, dry_run: bool, categories=None):
         self.load_config()
         matches = self._match(pattern)
         if not matches:
             print(f"❌ No matching devices for {pattern!r}")
             return
+
+        # Collect existing retained topics up front (needed for category filter and stale calc)
+        self.collect_mqtt()
+
+        if categories:
+            results = self.verifier.verify(self.devices, self.mqtt_data)
+            matches = filter_matches_by_categories(matches, results, categories)
+            if not matches:
+                print(f"❌ No devices match {pattern!r} with categories {categories}")
+                return
 
         # Build new payloads for matching devices
         new_topics: Dict[str, Dict[str, dict]] = {}  # dev_id -> {topic -> payload}
@@ -196,8 +239,6 @@ class DiscoveryManager:
             except Exception as e:
                 logger.error(f"Generator failed for {d['id']}: {e}")
 
-        # Collect existing retained topics for the same device-ids
-        self.collect_mqtt()
         existing: Dict[str, Set[str]] = defaultdict(set)
         for topic, msg in self.mqtt_data.items():
             ids = msg["payload"].get("device", {}).get("identifiers", [])
@@ -244,19 +285,26 @@ class DiscoveryManager:
         publish.multiple(msgs, hostname=BROKER_HOST, port=BROKER_PORT)
         print(f"✅ done.")
 
-    def cmd_clear(self, pattern: str, stale_only: bool, yes: bool, dry_run: bool):
+    def cmd_clear(self, pattern: str, stale_only: bool, yes: bool, dry_run: bool, categories=None):
         self.load_config()
         matches = self._match(pattern)
         if not matches:
             print(f"❌ No matching devices for {pattern!r}")
             return
 
-        matched_ids = {m['id'] for m in matches}
         self.collect_mqtt()
+        results = (self.verifier.verify(self.devices, self.mqtt_data)
+                   if (stale_only or categories) else None)
+
+        if categories:
+            matches = filter_matches_by_categories(matches, results, categories)
+            if not matches:
+                print(f"❌ No devices match {pattern!r} with categories {categories}")
+                return
+
+        matched_ids = {m['id'] for m in matches}
 
         if stale_only:
-            # Need verify to determine which existing topics are unexpected
-            results = self.verifier.verify(self.devices, self.mqtt_data)
             topics_by_dev: Dict[str, List[str]] = defaultdict(list)
             for items in results.values():
                 if not isinstance(items, list):
@@ -357,22 +405,31 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Tuya MQTT discovery manager")
     sub = parser.add_subparsers(dest='cmd', metavar='COMMAND')
 
+    cat_kwargs = dict(
+        action='append', choices=list(CATEGORY_ALIASES.keys()),
+        metavar='CAT',
+        help=f'Filter to category (repeatable). Choices: {", ".join(CATEGORY_ALIASES)}',
+    )
+
     p_status = sub.add_parser('status', help='Show discovery state summary (default)')
     p_status.add_argument('pattern', nargs='?', default='*',
                           help='Filter mismatch detail by id/name fnmatch pattern (default: all)')
     p_status.add_argument('--detail', action='store_true',
                           help='Show field-level diffs for mismatched devices')
+    p_status.add_argument('-c', '--category', **cat_kwargs)
 
     p_pub = sub.add_parser('publish', help='Clear stale + publish current discovery for matching devices')
     p_pub.add_argument('pattern', nargs='?', default='*', help='fnmatch on id/name (default: all)')
     p_pub.add_argument('-y', '--yes', action='store_true', help='Skip confirmation prompt')
     p_pub.add_argument('--dry-run', action='store_true', help='Show plan without publishing')
+    p_pub.add_argument('-c', '--category', **cat_kwargs)
 
     p_clr = sub.add_parser('clear', help='Clear discovery topics for matching devices')
     p_clr.add_argument('pattern', nargs='?', default='*', help='fnmatch on id/name (default: all)')
     p_clr.add_argument('--stale-only', action='store_true', help='Only clear topics not produced by current generator')
     p_clr.add_argument('-y', '--yes', action='store_true')
     p_clr.add_argument('--dry-run', action='store_true')
+    p_clr.add_argument('-c', '--category', **cat_kwargs)
 
     return parser
 
@@ -384,8 +441,10 @@ if __name__ == "__main__":
     if args.cmd in (None, 'status'):
         detail = getattr(args, 'detail', False)
         pattern = getattr(args, 'pattern', '*')
-        mgr.cmd_status(detail=detail, pattern=pattern)
+        categories = getattr(args, 'category', None)
+        mgr.cmd_status(detail=detail, pattern=pattern, categories=categories)
     elif args.cmd == 'publish':
-        mgr.cmd_publish(args.pattern, yes=args.yes, dry_run=args.dry_run)
+        mgr.cmd_publish(args.pattern, yes=args.yes, dry_run=args.dry_run, categories=args.category)
     elif args.cmd == 'clear':
-        mgr.cmd_clear(args.pattern, stale_only=args.stale_only, yes=args.yes, dry_run=args.dry_run)
+        mgr.cmd_clear(args.pattern, stale_only=args.stale_only, yes=args.yes,
+                      dry_run=args.dry_run, categories=args.category)
