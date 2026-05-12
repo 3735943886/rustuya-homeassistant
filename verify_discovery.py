@@ -401,14 +401,37 @@ class DiscoveryManager:
                     print(f"      expected: {e.get(k)}")
 
 
+EPILOG = """\
+Categories (-c/--category, repeatable, narrows matches AND-wise with PATTERN):
+  mismatched  retained payload differs from current generator output
+  partial     some expected topics present, others missing
+  pure        none of the expected topics are retained
+  unexpected  retained topics with no expected counterpart
+  no-dp       device produces no generator output (e.g. repeater stub)
+  perfect     all expected topics present and matching
+
+Examples:
+  verify_discovery.py status                              # default summary
+  verify_discovery.py status -c mismatched --detail       # mismatched-only, field diffs
+  verify_discovery.py publish '*' -c mismatched --dry-run # preview fix for mismatched
+  verify_discovery.py publish '*_lightswitch' -c mismatched -c pure
+  verify_discovery.py clear '*' --stale-only              # drop only orphan topics
+"""
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Tuya MQTT discovery manager")
+    parser = argparse.ArgumentParser(
+        description="Tuya MQTT discovery manager",
+        epilog=EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     sub = parser.add_subparsers(dest='cmd', metavar='COMMAND')
 
     cat_kwargs = dict(
         action='append', choices=list(CATEGORY_ALIASES.keys()),
         metavar='CAT',
-        help=f'Filter to category (repeatable). Choices: {", ".join(CATEGORY_ALIASES)}',
+        help=('Filter to verifier category (repeatable, AND-combined with PATTERN). '
+              'Choices: ' + ', '.join(CATEGORY_ALIASES) + '. See bottom of -h for meanings.'),
     )
 
     p_status = sub.add_parser('status', help='Show discovery state summary (default)')
@@ -427,8 +450,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_clr = sub.add_parser('clear', help='Clear discovery topics for matching devices')
     p_clr.add_argument('pattern', nargs='?', default='*', help='fnmatch on id/name (default: all)')
     p_clr.add_argument('--stale-only', action='store_true', help='Only clear topics not produced by current generator')
-    p_clr.add_argument('-y', '--yes', action='store_true')
-    p_clr.add_argument('--dry-run', action='store_true')
+    p_clr.add_argument('-y', '--yes', action='store_true', help='Skip confirmation prompt')
+    p_clr.add_argument('--dry-run', action='store_true', help='Show plan without clearing')
     p_clr.add_argument('-c', '--category', **cat_kwargs)
 
     return parser
