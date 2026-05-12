@@ -1,57 +1,65 @@
+"""Publish HA MQTT discovery payloads for all (or matching) devices.
+
+Use after changing generator behavior (e.g., editing
+tuya_mapping.UNAVAILABLE_ERROR_CODES) to push the new retained payloads to HA.
+Retained messages overwrite the prior ones, so HA picks up the new config
+on its next discovery scan.
+
+Usage:
+    python3 register_device.py                      # publish all devices
+    python3 register_device.py living_lightswitch   # exact name or id match
+    python3 register_device.py 'eb*'                # fnmatch pattern (id or name)
+"""
 import json
 import sys
 import logging
+import fnmatch
+import paho.mqtt.publish as publish
+
 from tuya_discovery_generator import initialize_generator
 
-# Disable verbose logging to see only the output
-logging.getLogger("tuya_discovery").setLevel(logging.WARNING)
-logging.getLogger("external_converter").setLevel(logging.WARNING)
+BROKER_HOST = "localhost"
+BROKER_PORT = 1883
+DEVICES_JSON = "tuyadevices.json"
+
+logging.basicConfig(level=logging.WARNING)
+
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python3 show_device.py <index>")
-        print("Example: python3 show_device.py 0")
+    pattern = sys.argv[1] if len(sys.argv) > 1 else "*"
+
+    with open(DEVICES_JSON) as f:
+        devices = json.load(f)
+
+    matches = [
+        d for d in devices
+        if fnmatch.fnmatch(str(d.get("id", "")), pattern)
+        or fnmatch.fnmatch(str(d.get("name", "")), pattern)
+    ]
+
+    if not matches:
+        print(f"No devices matched pattern: {pattern!r}")
         return
 
-    try:
-        index = int(sys.argv[1])
-    except ValueError:
-        print("Error: Index must be an integer.")
-        return
-
-    # Initialize generator
     gen = initialize_generator()
+    msgs = []
+    for d in matches:
+        payloads, source = gen.generate(d)
+        for topic, payload in payloads.items():
+            msgs.append({
+                "topic": topic,
+                "payload": json.dumps(payload),
+                "retain": True,
+            })
+        print(f"  {d['id']} ({d.get('name')}) -> {len(payloads)} topics [{source}]")
 
-    devices_path = "tuyadevices.json"
-    try:
-        with open(devices_path, 'r') as f:
-            devices = json.load(f)
+    if not msgs:
+        print("\nNo topics to publish (matched devices generated no payloads).")
+        return
 
-        if index < 0 or index >= len(devices):
-            print(f"Error: Index {index} is out of range (0 to {len(devices)-1}).")
-            return
+    publish.multiple(msgs, hostname=BROKER_HOST, port=BROKER_PORT)
+    print(f"\nPublished {len(msgs)} retained topics for {len(matches)} device(s).")
 
-        device = devices[index]
-        payloads, source = gen.generate(device)
-
-        print("\n" + "="*80)
-        print(f"DEVICE INFO (Index: {index})")
-        print(f"  Name: {device.get('name', 'N/A')}")
-        print(f"  ID:   {device.get('id')}")
-        print(f"  PID:  {device.get('product_id')}")
-        print(f"  Cat:  {device.get('category')}")
-        print(f"  Match Source: {source}")
-        print("="*80)
-        print("\n--- MQTT DISCOVERY PAYLOADS ---")
-        import paho.mqtt.publish as publish
-        for topic in payloads:
-            publish.single(topic=topic, payload=json.dumps(payloads[topic]), retain=True)
-        print("="*80)
-
-    except FileNotFoundError:
-        print(f"Error: {devices_path} not found.")
-    except Exception as e:
-        print(f"An unexpected error occurred: {e}")
 
 if __name__ == "__main__":
     main()

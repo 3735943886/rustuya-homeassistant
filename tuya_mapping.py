@@ -172,3 +172,46 @@ PROPERTY_MAP = {
     "illuminance": ("sensor", "illuminance", "lx", None),
     "distance": ("sensor", "distance", "m", None),
 }
+
+# --- rustuya errorCode Mapping ---
+# rustuya가 rustuya/error/<device_id> 토픽에 발행하는 errorCode 전체 사전.
+# 출처: rustuya/src/... define_error_codes! 매크로
+#
+# 열: (이름, 사람이 읽는 메시지, 발행 출처)
+#   - "rustuya": rustuya가 디바이스에 도달 못 했거나 응답 받지 못해 자체 발행
+#   - "device":  디바이스가 응답을 보냈고 rustuya가 전달 (즉 디바이스 살아있음)
+#   - "cloud":   Tuya 클라우드 통신 영역 (디바이스 health와 무관)
+ERROR_CODES = {
+    0:   ("ERR_SUCCESS",    "Connection Successful",             "device"),
+    900: ("ERR_JSON",       "Invalid JSON Response from Device", "device"),
+    901: ("ERR_CONNECT",    "Network Error: Unable to Connect",  "rustuya"),
+    902: ("ERR_TIMEOUT",    "Timeout Waiting for Device",        "rustuya"),
+    903: ("ERR_RANGE",      "Specified Value Out of Range",      "device"),
+    904: ("ERR_PAYLOAD",    "Unexpected Payload from Device",    "device"),
+    905: ("ERR_OFFLINE",    "Network Error: Device Unreachable", "rustuya"),
+    906: ("ERR_STATE",      "Device in Unknown State",           "device"),
+    907: ("ERR_FUNCTION",   "Function Not Supported by Device",  "device"),
+    908: ("ERR_DEVTYPE",    "Device22 Detected: Retry Command",  "device"),
+    909: ("ERR_CLOUDKEY",   "Missing Tuya Cloud Key and Secret", "cloud"),
+    910: ("ERR_CLOUDRESP",  "Invalid JSON Response from Cloud",  "cloud"),
+    911: ("ERR_CLOUDTOKEN", "Unable to Get Cloud Token",         "cloud"),
+    912: ("ERR_PARAMS",     "Missing Function Parameters",       "cloud"),
+    913: ("ERR_CLOUD",      "Error Response from Tuya Cloud",    "cloud"),
+    914: ("ERR_KEY_OR_VER", "Check device key or version",       "device"),
+}
+
+# 위 사전 중 HA entity를 unavailable로 표시할 errorCode 목록.
+# `tuya_discovery_generator`의 availability_template이 이 리스트를 참조해
+# 자동으로 갱신되므로, 새 코드 발견시 이 리스트만 수정하고 골든을 재생성하면 됨.
+#
+# 편집 가이드:
+#   - 901 ERR_CONNECT, 905 ERR_OFFLINE  → rustuya가 통신 실패로 발행 (명백한 unavailable)
+#   - 914 ERR_KEY_OR_VER                → 디바이스는 응답하나 key/version 불일치로
+#                                          모든 명령 차단됨. 재등록 필요. 기능적 unavailable.
+#   - 902 ERR_TIMEOUT (제외 중)         → 일시적일 수 있어 false unavailable 방지 위해 제외.
+#                                          실 사용에서 진짜 offline 케이스 놓친다 판단되면 추가.
+#   - 그 외 device-emitted (900/903/904/906/907/908)
+#                                       → 디바이스가 응답함 = 살아있음. 특정 명령만 실패하는 거라
+#                                          available 유지가 맞음 (예: 914와 달리 다른 명령은 통함).
+#   - 909~913 (cloud)                   → 디바이스 health와 무관. 추가 의미 없음.
+UNAVAILABLE_ERROR_CODES = [901, 905, 914]

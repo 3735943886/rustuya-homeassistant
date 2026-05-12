@@ -1,0 +1,128 @@
+[
+  {
+    "id": "synth_climate_01",
+    "name": "synth_thermostat_basic",
+    "category": "wk",
+    "product_id": "synth_wk_001",
+    "product_name": "Synthetic Thermostat",
+    "local_strategy": {
+      "1": {
+        "status_code": "switch",
+        "config_item": {"valueType": "Boolean"}
+      },
+      "2": {
+        "status_code": "temp_set",
+        "config_item": {
+          "valueType": "Integer",
+          "valueDesc": {"min": 5, "max": 35, "step": 1, "scale": 0, "unit": "°C"}
+        }
+      },
+      "3": {
+        "status_code": "temp_current",
+        "config_item": {
+          "valueType": "Integer",
+          "valueDesc": {"min": -20, "max": 60, "scale": 0, "unit": "°C"}
+        }
+      },
+      "4": {
+        "status_code": "mode",
+        "config_item": {
+          "valueType": "Enum",
+          "valueDesc": {"range": ["auto", "heat", "cool"]}
+        }
+      }
+    },
+    "function": {
+      "switch": {},
+      "temp_set": {},
+      "mode": {}
+    }
+  },
+  {
+    "id": "synth_climate_02",
+    "name": "synth_thermostat_scaled",
+    "category": "wk",
+    "product_id": "synth_wk_002",
+    "product_name": "Synthetic Thermostat (scale=1)",
+    "local_strategy": {
+      "1": {
+        "status_code": "temp_set",
+        "config_item": {
+          "valueType": "Integer",
+          "valueDesc": {"min": 50, "max": 350, "step": 5, "scale": 1, "unit": "°C"}
+        }
+      },
+      "2": {
+        "status_code": "temp_current",
+        "config_item": {
+          "valueType": "Integer",
+          "valueDesc": {"scale": 1, "unit": "°C"}
+        }
+      }
+    },
+    "function": {
+      "temp_set": {}
+    }
+  },
+  {
+    "id": "synth_fan_01",
+    "name": "synth_fan_basic",
+    "category": "fs",
+    "product_id": "synth_fs_001",
+    "product_name": "Synthetic Fan",
+    "local_strategy": {
+      "1": {
+        "status_code": "switch",
+        "config_item": {"valueType": "Boolean"}
+      },
+      "2": {
+        "status_code": "fan_speed",
+        "config_item": {
+          "valueType": "Enum",
+          "valueDesc": {"range": ["low", "mid", "high"]}
+        }
+      },
+      "3": {
+        "status_code": "fan_horizontal",
+        "config_item": {"valueType": "Boolean"}
+      }
+    },
+    "function": {
+      "switch": {},
+      "fan_speed": {},
+      "fan_horizontal": {}
+    }
+  },
+  {
+    "id": "synth_light_01",
+    "name": "synth_light_basic",
+    "category": "dj",
+    "product_id": "synth_dj_001",
+    "product_name": "Synthetic Light",
+    "local_strategy": {
+      "1": {
+        "status_code": "switch_led",
+        "config_item": {"valueType": "Boolean"}
+      },
+      "2": {
+        "status_code": "bright_value",
+        "config_item": {
+          "valueType": "Integer",
+          "valueDesc": {"min": 10, "max": 1000, "scale": 0}
+        }
+      },
+      "3": {
+        "status_code": "temp_value",
+        "config_item": {
+          "valueType": "Integer",
+          "valueDesc": {"min": 0, "max": 1000, "scale": 0}
+        }
+      }
+    },
+    "function": {
+      "switch_led": {},
+      "bright_value": {},
+      "temp_value": {}
+    }
+  }
+]
