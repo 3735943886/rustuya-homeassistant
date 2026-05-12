@@ -4,6 +4,8 @@ Three subcommands:
 
     python3 verify_discovery.py                       # status (default)
     python3 verify_discovery.py status
+    python3 verify_discovery.py status --detail       # + field-level diffs for all mismatched
+    python3 verify_discovery.py status --detail 'Door*'  # + diffs filtered by pattern
 
     python3 verify_discovery.py publish [PATTERN]     # clear stale + publish current
     python3 verify_discovery.py publish 'Door*' -y
@@ -170,11 +172,13 @@ class DiscoveryManager:
 
     # --- Commands ---
 
-    def cmd_status(self):
+    def cmd_status(self, detail: bool = False, pattern: str = "*"):
         self.load_config()
         self.collect_mqtt()
         results = self.verifier.verify(self.devices, self.mqtt_data)
         self._print_summary(results)
+        if detail:
+            self._print_mismatch_details(results, pattern)
 
     def cmd_publish(self, pattern: str, yes: bool, dry_run: bool):
         self.load_config()
@@ -325,12 +329,39 @@ class DiscoveryManager:
         total_err = sum(counts[c] for c in counts if c not in ['perfect', 'no_dp_config', 'orphans', 'errors'])
         print(f"\n{'✨ Consistent!' if not total_err else f'🚨 Issues found: {total_err}'}\n" + "=" * 60)
 
+    def _print_mismatch_details(self, results: Dict, pattern: str):
+        mismatched = results.get("mismatched_payload") or []
+        matched_devices = [
+            d for d in mismatched
+            if fnmatch.fnmatch(str(d.get('id', '')), pattern)
+            or fnmatch.fnmatch(str(d.get('name', '')), pattern)
+        ]
+        if not matched_devices:
+            print("\n(no mismatched devices for pattern)")
+            return
+
+        print("\n" + "=" * 60 + f"\nMISMATCH DETAIL  pattern={pattern!r}, devices={len(matched_devices)}\n" + "=" * 60)
+        for d in matched_devices:
+            print(f"\n📍 {d['name']} ({d['id']})")
+            for m in d['mismatched']:
+                a, e = m['actual'], m['expected']
+                diff_keys = sorted(k for k in set(a) | set(e) if a.get(k) != e.get(k))
+                print(f"  {m['topic']}  ({len(diff_keys)} field(s) differ)")
+                for k in diff_keys:
+                    print(f"    [{k}]")
+                    print(f"      actual:   {a.get(k)}")
+                    print(f"      expected: {e.get(k)}")
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Tuya MQTT discovery manager")
     sub = parser.add_subparsers(dest='cmd', metavar='COMMAND')
 
-    sub.add_parser('status', help='Show discovery state summary (default)')
+    p_status = sub.add_parser('status', help='Show discovery state summary (default)')
+    p_status.add_argument('pattern', nargs='?', default='*',
+                          help='Filter mismatch detail by id/name fnmatch pattern (default: all)')
+    p_status.add_argument('--detail', action='store_true',
+                          help='Show field-level diffs for mismatched devices')
 
     p_pub = sub.add_parser('publish', help='Clear stale + publish current discovery for matching devices')
     p_pub.add_argument('pattern', nargs='?', default='*', help='fnmatch on id/name (default: all)')
@@ -351,7 +382,9 @@ if __name__ == "__main__":
     mgr = DiscoveryManager()
 
     if args.cmd in (None, 'status'):
-        mgr.cmd_status()
+        detail = getattr(args, 'detail', False)
+        pattern = getattr(args, 'pattern', '*')
+        mgr.cmd_status(detail=detail, pattern=pattern)
     elif args.cmd == 'publish':
         mgr.cmd_publish(args.pattern, yes=args.yes, dry_run=args.dry_run)
     elif args.cmd == 'clear':
