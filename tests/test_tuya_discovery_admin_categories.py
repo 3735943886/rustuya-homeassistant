@@ -1,27 +1,13 @@
-"""Tests for --category filter helpers in verify_discovery.
-
-paho is not installed on the dev machine; stub it before importing the module
-under test so the import doesn't fail.
-"""
+"""Tests for --category filter helpers in tuya_discovery_admin."""
 import sys
-import types
 from pathlib import Path
 
 import pytest
 
-
-def _stub_paho():
-    for name in ("paho", "paho.mqtt", "paho.mqtt.client", "paho.mqtt.publish"):
-        sys.modules.setdefault(name, types.ModuleType(name))
-    sys.modules["paho.mqtt.client"].Client = object
-    sys.modules["paho.mqtt.client"].CallbackAPIVersion = types.SimpleNamespace(VERSION2=2)
-
-
-_stub_paho()
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from verify_discovery import (  # noqa: E402
+from tuya_discovery_admin import (  # noqa: E402
     CATEGORY_ALIASES,
     filter_matches_by_categories,
     filter_status_results,

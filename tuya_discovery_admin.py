@@ -1,20 +1,22 @@
-"""Tuya MQTT discovery manager.
+"""Tuya MQTT discovery admin.
 
-Three subcommands:
+Subcommands:
 
-    python3 verify_discovery.py                       # status (default)
-    python3 verify_discovery.py status
-    python3 verify_discovery.py status --detail       # + field-level diffs for all mismatched
-    python3 verify_discovery.py status --detail 'Door*'  # + diffs filtered by pattern
+    python3 tuya_discovery_admin.py                       # status (default)
+    python3 tuya_discovery_admin.py status
+    python3 tuya_discovery_admin.py status --detail       # + field-level diffs for all mismatched
+    python3 tuya_discovery_admin.py status --detail 'Door*'  # + diffs filtered by pattern
 
-    python3 verify_discovery.py publish [PATTERN]     # clear stale + publish current
-    python3 verify_discovery.py publish 'Door*' -y
-    python3 verify_discovery.py publish '*' --dry-run
-    python3 verify_discovery.py publish '*' -c mismatched   # only mismatched devices
+    python3 tuya_discovery_admin.py preview [PATTERN]     # dump expected generator output (no MQTT)
 
-    python3 verify_discovery.py clear [PATTERN]       # clear ALL topics for matches
-    python3 verify_discovery.py clear 'Door*' --stale-only
-    python3 verify_discovery.py clear '*' -y
+    python3 tuya_discovery_admin.py publish [PATTERN]     # clear stale + publish current
+    python3 tuya_discovery_admin.py publish 'Door*' -y
+    python3 tuya_discovery_admin.py publish '*' --dry-run
+    python3 tuya_discovery_admin.py publish '*' -c mismatched   # only mismatched devices
+
+    python3 tuya_discovery_admin.py clear [PATTERN]       # clear ALL topics for matches
+    python3 tuya_discovery_admin.py clear 'Door*' --stale-only
+    python3 tuya_discovery_admin.py clear '*' -y
 
 PATTERN is fnmatch on device id or name (default '*' = all).
 -c/--category (repeatable) narrows matches to one of:
@@ -22,6 +24,8 @@ PATTERN is fnmatch on device id or name (default '*' = all).
 `publish` always clears stale topics first (topics for matching device-id no
 longer produced by generator), then publishes current generator output. Both
 happen in a single MQTT connection via publish.multiple.
+`preview` is read-only and never touches MQTT — paho is loaded lazily so this
+command works on dev machines without an MQTT stack installed.
 """
 import json
 import time
@@ -30,8 +34,6 @@ import argparse
 import fnmatch
 from collections import defaultdict
 from typing import Dict, List, Set
-import paho.mqtt.client as mqtt
-import paho.mqtt.publish as publish
 
 from tuya_discovery_generator import initialize_generator
 
@@ -72,7 +74,7 @@ def filter_status_results(results, categories):
     }
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
-logger = logging.getLogger("verify_discovery")
+logger = logging.getLogger("tuya_discovery_admin")
 
 
 class DiscoveryVerifier:
@@ -174,6 +176,7 @@ class DiscoveryManager:
 
     def collect_mqtt(self):
         """Subscribe to homeassistant/# and collect retained /config payloads."""
+        import paho.mqtt.client as mqtt
         client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
 
         def on_msg(c, u, m):
@@ -212,6 +215,29 @@ class DiscoveryManager:
         self._print_summary(results)
         if detail:
             self._print_mismatch_details(results, pattern)
+
+    def cmd_preview(self, pattern: str):
+        """Show generator output for matching devices without touching MQTT."""
+        self.load_config()
+        matches = self._match(pattern)
+        if not matches:
+            print(f"❌ No matching devices for {pattern!r}")
+            return
+        for d in matches:
+            print("\n" + "=" * 80)
+            print(f"DEVICE: {d.get('name', 'N/A')}")
+            print(f"  ID:       {d.get('id')}")
+            print(f"  PID:      {d.get('product_id')}")
+            print(f"  Category: {d.get('category')}")
+            try:
+                payloads, source = self.verifier.generator.generate(d)
+            except Exception as e:
+                print(f"  ❌ generator error: {e}")
+                continue
+            print(f"  Source:   {source}")
+            print(f"  Topics:   {len(payloads)}")
+            print("=" * 80)
+            print(json.dumps(payloads, indent=2, ensure_ascii=False))
 
     def cmd_publish(self, pattern: str, yes: bool, dry_run: bool, categories=None):
         self.load_config()
@@ -282,6 +308,7 @@ class DiscoveryManager:
             print("aborted.")
             return
 
+        import paho.mqtt.publish as publish
         publish.multiple(msgs, hostname=BROKER_HOST, port=BROKER_PORT)
         print(f"✅ done.")
 
@@ -348,6 +375,7 @@ class DiscoveryManager:
             for topics in topics_by_dev.values()
             for t in set(topics)
         ]
+        import paho.mqtt.publish as publish
         publish.multiple(msgs, hostname=BROKER_HOST, port=BROKER_PORT)
         print(f"✅ cleared {total} topic(s).")
 
@@ -411,17 +439,18 @@ Categories (-c/--category, repeatable, narrows matches AND-wise with PATTERN):
   perfect     all expected topics present and matching
 
 Examples:
-  verify_discovery.py status                              # default summary
-  verify_discovery.py status -c mismatched --detail       # mismatched-only, field diffs
-  verify_discovery.py publish '*' -c mismatched --dry-run # preview fix for mismatched
-  verify_discovery.py publish '*_lightswitch' -c mismatched -c pure
-  verify_discovery.py clear '*' --stale-only              # drop only orphan topics
+  tuya_discovery_admin.py status                              # default summary
+  tuya_discovery_admin.py status -c mismatched --detail       # mismatched-only, field diffs
+  tuya_discovery_admin.py preview 'guest_*'                   # dump generator output, no MQTT
+  tuya_discovery_admin.py publish '*' -c mismatched --dry-run # preview fix for mismatched
+  tuya_discovery_admin.py publish '*_lightswitch' -c mismatched -c pure
+  tuya_discovery_admin.py clear '*' --stale-only              # drop only orphan topics
 """
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Tuya MQTT discovery manager",
+        description="Tuya MQTT discovery admin",
         epilog=EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -440,6 +469,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_status.add_argument('--detail', action='store_true',
                           help='Show field-level diffs for mismatched devices')
     p_status.add_argument('-c', '--category', **cat_kwargs)
+
+    p_prev = sub.add_parser('preview', help='Dump expected generator output for matching devices (no MQTT)')
+    p_prev.add_argument('pattern', nargs='?', default='*', help='fnmatch on id/name (default: all)')
 
     p_pub = sub.add_parser('publish', help='Clear stale + publish current discovery for matching devices')
     p_pub.add_argument('pattern', nargs='?', default='*', help='fnmatch on id/name (default: all)')
@@ -466,6 +498,8 @@ if __name__ == "__main__":
         pattern = getattr(args, 'pattern', '*')
         categories = getattr(args, 'category', None)
         mgr.cmd_status(detail=detail, pattern=pattern, categories=categories)
+    elif args.cmd == 'preview':
+        mgr.cmd_preview(args.pattern)
     elif args.cmd == 'publish':
         mgr.cmd_publish(args.pattern, yes=args.yes, dry_run=args.dry_run, categories=args.category)
     elif args.cmd == 'clear':
