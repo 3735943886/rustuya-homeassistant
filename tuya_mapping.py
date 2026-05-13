@@ -106,10 +106,10 @@ DP_CODE_MAP = {
 }
 
 # --- Tuya Category Reference ---
-# Tuya 공식 카테고리 코드 → 설명 (developer.tuya.com 기준).
-# 이 dict은 단순 참조용. 실제 HA 도메인 라우팅은 아래 CATEGORY_MAP이 담당.
-# 새 카테고리 디바이스 만났을 때 의미 빠르게 확인하고, 핸들러 만들 가치 있다고 판단되면
-# CATEGORY_MAP에 의도적으로 추가하는 흐름.
+# Official Tuya category codes -> description (per developer.tuya.com).
+# This dict is reference-only. Actual HA domain routing is done by CATEGORY_MAP below.
+# When encountering a new category device, look it up here for meaning; if it's worth
+# building a handler, add it deliberately to CATEGORY_MAP.
 TUYA_CATEGORIES = {
     'cjkg':   'Scene switch',
     'ckqdkg': 'Hotel key card switch',
@@ -143,11 +143,13 @@ TUYA_CATEGORIES = {
 }
 
 # --- Category Mapping (Tuya Category -> HA Domain) ---
-# 실제 HA 도메인 라우팅 dict. 여기 등록된 카테고리만 _build_entities의 cover/climate/
-# fan/light 전용 핸들러 또는 GENERIC_MAP의 카테고리별 오버라이드를 받음.
-# 등록되지 않은 카테고리는 generic individual DP 처리로 폴백.
-# TUYA_CATEGORIES에는 있지만 여기 없는 카테고리(예: cjkg, ckqdkg, dlq, pir 등)는
-# 의도적으로 미등록 — 적절한 매핑이 명확해질 때까지 generic 폴백으로 처리.
+# The actual HA domain routing dict. Only categories registered here receive the
+# cover/climate/fan/light-specific handlers in _build_entities or per-category
+# overrides from GENERIC_MAP. Unregistered categories fall back to generic
+# individual DP handling.
+# Categories present in TUYA_CATEGORIES but missing here (e.g. cjkg, ckqdkg, dlq,
+# pir) are intentionally unregistered — handled via generic fallback until a
+# clearer mapping is known.
 CATEGORY_MAP = {
     # Cover / Curtain
     'cl': 'cover', 'clkg': 'cover', 'mc': 'cover', 'rs': 'cover', 'jdcljqr': 'cover',
@@ -192,10 +194,10 @@ GENERIC_MAP = {
     "kg": {"default_bool": ("switch", "switch", None, None)},
     "cz": {"default_bool": ("switch", "outlet", None, None)},
     "pc": {"default_bool": ("switch", "outlet", None, None)},
-    # mcs (Contact sensor): 일부 디바이스가 'switch' 코드로 contact 상태를 보고함
-    # (예: Door Sensor, product_id 7jIGJAymiH8OsFFb).
-    # DP_CODE_MAP['switch']가 controllable switch로 매핑되는데 mcs에서는
-    # read-only binary_sensor가 맞으므로 카테고리 단위로 오버라이드.
+    # mcs (Contact sensor): some devices report contact state via the 'switch' code
+    # (e.g. Door Sensor, product_id 7jIGJAymiH8OsFFb).
+    # DP_CODE_MAP['switch'] maps to a controllable switch, but on mcs it should be
+    # a read-only binary_sensor — override at the category level.
     "mcs": {"switch": ("binary_sensor", "door", None, None)},
 }
 
@@ -221,13 +223,16 @@ PROPERTY_MAP = {
 }
 
 # --- rustuya errorCode Mapping ---
-# rustuya가 rustuya/error/<device_id> 토픽에 발행하는 errorCode 전체 사전.
-# 출처: rustuya/src/... define_error_codes! 매크로
+# Full dictionary of errorCodes that rustuya publishes to the
+# rustuya/error/<device_id> topic.
+# Source: rustuya/src/... define_error_codes! macro
 #
-# 열: (이름, 사람이 읽는 메시지, 발행 출처)
-#   - "rustuya": rustuya가 디바이스에 도달 못 했거나 응답 받지 못해 자체 발행
-#   - "device":  디바이스가 응답을 보냈고 rustuya가 전달 (즉 디바이스 살아있음)
-#   - "cloud":   Tuya 클라우드 통신 영역 (디바이스 health와 무관)
+# Columns: (name, human-readable message, emitter)
+#   - "rustuya": rustuya emits this itself when it cannot reach the device or
+#                 gets no response
+#   - "device":  the device responded and rustuya forwarded it (i.e. the device
+#                 is alive)
+#   - "cloud":   Tuya cloud communication layer (unrelated to device health)
 ERROR_CODES = {
     0:   ("ERR_SUCCESS",    "Connection Successful",             "device"),
     900: ("ERR_JSON",       "Invalid JSON Response from Device", "device"),
@@ -247,18 +252,27 @@ ERROR_CODES = {
     914: ("ERR_KEY_OR_VER", "Check device key or version",       "device"),
 }
 
-# 위 사전 중 HA entity를 unavailable로 표시할 errorCode 목록.
-# `tuya_discovery_generator`의 availability_template이 이 리스트를 참조해
-# 자동으로 갱신되므로, 새 코드 발견시 이 리스트만 수정하고 골든을 재생성하면 됨.
+# Subset of errorCodes from the dictionary above that should mark an HA entity
+# as unavailable. `tuya_discovery_generator`'s availability_template references
+# this list and is regenerated automatically, so when new codes appear just edit
+# this list and regenerate the golden output.
 #
-# 편집 가이드:
-#   - 901 ERR_CONNECT, 905 ERR_OFFLINE  → rustuya가 통신 실패로 발행 (명백한 unavailable)
-#   - 914 ERR_KEY_OR_VER                → 디바이스는 응답하나 key/version 불일치로
-#                                          모든 명령 차단됨. 재등록 필요. 기능적 unavailable.
-#   - 902 ERR_TIMEOUT (제외 중)         → 일시적일 수 있어 false unavailable 방지 위해 제외.
-#                                          실 사용에서 진짜 offline 케이스 놓친다 판단되면 추가.
-#   - 그 외 device-emitted (900/903/904/906/907/908)
-#                                       → 디바이스가 응답함 = 살아있음. 특정 명령만 실패하는 거라
-#                                          available 유지가 맞음 (예: 914와 달리 다른 명령은 통함).
-#   - 909~913 (cloud)                   → 디바이스 health와 무관. 추가 의미 없음.
+# Editing guide:
+#   - 901 ERR_CONNECT, 905 ERR_OFFLINE  -> emitted by rustuya on comm failure
+#                                          (clearly unavailable)
+#   - 914 ERR_KEY_OR_VER                -> device responds, but key/version
+#                                          mismatch blocks all commands.
+#                                          Requires re-registration. Functionally
+#                                          unavailable.
+#   - 902 ERR_TIMEOUT (excluded)        -> can be transient; excluded to avoid
+#                                          false unavailable. Add it if real
+#                                          offline cases are being missed in
+#                                          practice.
+#   - Other device-emitted (900/903/904/906/907/908)
+#                                       -> the device replied = it's alive. Only
+#                                          specific commands fail, so keep the
+#                                          entity available (unlike 914, other
+#                                          commands still work).
+#   - 909~913 (cloud)                   -> unrelated to device health; no value
+#                                          adding them.
 UNAVAILABLE_ERROR_CODES = [901, 905, 914]
