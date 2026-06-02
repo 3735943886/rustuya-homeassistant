@@ -6,7 +6,7 @@
       "homeassistant/climate/synth_climate_01_thermostat/config": {
         "availability_template": "{{ 'offline' if value_json is defined and value_json != None and value_json.errorCode in [901, 905, 914] else 'online' }}",
         "availability_topic": "rustuya/error/synth_climate_01",
-        "current_temperature_template": "{{ value_json.value if value_json is defined and value_json != None and value_json.value != None else 'unknown' }}",
+        "current_temperature_template": "{{ value_json.value if value_json is defined and value_json != None and value_json.value != None and value_json.type | default('passive') == 'passive' else 'unknown' }}",
         "current_temperature_topic": "rustuya/event/synth_climate_01/3",
         "device": {
           "identifiers": [
@@ -17,14 +17,14 @@
           "name": "synth_thermostat_basic"
         },
         "mode_command_topic": "rustuya/command/set/synth_climate_01/4",
-        "mode_state_template": "{{ value_json.value if value_json is defined and value_json != None and value_json.value != None else 'unknown' }}",
+        "mode_state_template": "{{ value_json.value if value_json is defined and value_json != None and value_json.value != None and value_json.type | default('passive') == 'passive' else 'unknown' }}",
         "mode_state_topic": "rustuya/event/synth_climate_01/4",
         "name": null,
         "payload_available": "online",
         "payload_not_available": "offline",
         "power_command_topic": "rustuya/command/set/synth_climate_01/1",
         "temperature_command_topic": "rustuya/command/set/synth_climate_01/2",
-        "temperature_state_template": "{{ value_json.value if value_json is defined and value_json != None and value_json.value != None else 'unknown' }}",
+        "temperature_state_template": "{{ value_json.value if value_json is defined and value_json != None and value_json.value != None and value_json.type | default('passive') == 'passive' else 'unknown' }}",
         "temperature_state_topic": "rustuya/event/synth_climate_01/2",
         "unique_id": "synth_climate_01_climate"
       }
@@ -39,7 +39,7 @@
       "homeassistant/climate/synth_climate_02_thermostat/config": {
         "availability_template": "{{ 'offline' if value_json is defined and value_json != None and value_json.errorCode in [901, 905, 914] else 'online' }}",
         "availability_topic": "rustuya/error/synth_climate_02",
-        "current_temperature_template": "{{ ((value_json.value | float) / 10) | round(1) if value_json is defined and value_json != None and value_json.value != None else 'unknown' }}",
+        "current_temperature_template": "{{ ((value_json.value | float) / 10) | round(1) if value_json is defined and value_json != None and value_json.value != None and value_json.type | default('passive') == 'passive' else 'unknown' }}",
         "current_temperature_topic": "rustuya/event/synth_climate_02/2",
         "device": {
           "identifiers": [
@@ -53,7 +53,7 @@
         "payload_available": "online",
         "payload_not_available": "offline",
         "temperature_command_topic": "rustuya/command/set/synth_climate_02/1",
-        "temperature_state_template": "{{ ((value_json.value | float) / 10) | round(1) if value_json is defined and value_json != None and value_json.value != None else 'unknown' }}",
+        "temperature_state_template": "{{ ((value_json.value | float) / 10) | round(1) if value_json is defined and value_json != None and value_json.value != None and value_json.type | default('passive') == 'passive' else 'unknown' }}",
         "temperature_state_topic": "rustuya/event/synth_climate_02/1",
         "unique_id": "synth_climate_02_climate"
       }
@@ -84,7 +84,7 @@
         "payload_on": "true",
         "state_topic": "rustuya/event/synth_contact_01/101",
         "unique_id": "synth_contact_01_switch",
-        "value_template": "{{ 'true' if value_json is defined and value_json != None and value_json.value != None and value_json.value == true else 'false' if value_json is defined and value_json != None and value_json.value != None and value_json.value == false else 'unknown' }}"
+        "value_template": "{{ 'true' if value_json is defined and value_json != None and value_json.value != None and value_json.type | default('passive') == 'passive' and value_json.value == true else 'false' if value_json is defined and value_json != None and value_json.value != None and value_json.type | default('passive') == 'passive' and value_json.value == false else 'unknown' }}"
       },
       "homeassistant/sensor/synth_contact_01_battery/config": {
         "availability_template": "{{ 'offline' if value_json is defined and value_json != None and value_json.errorCode in [901, 905, 914] else 'online' }}",
@@ -104,7 +104,7 @@
         "state_topic": "rustuya/event/synth_contact_01/103",
         "unique_id": "synth_contact_01_battery",
         "unit_of_measurement": "%",
-        "value_template": "{{ value_json.value if value_json is defined and value_json != None and value_json.value != None else 'unknown' }}"
+        "value_template": "{{ value_json.value if value_json is defined and value_json != None and value_json.value != None and value_json.type | default('passive') == 'passive' else 'unknown' }}"
       }
     },
     "product_id": "synth_mcs_001",
@@ -129,16 +129,16 @@
         "name": null,
         "oscillation_command_topic": "rustuya/command/set/synth_fan_01/3",
         "oscillation_state_topic": "rustuya/event/synth_fan_01/3",
-        "oscillation_value_template": "{{ value_json.value if value_json is defined and value_json != None and value_json.value != None else 'unknown' }}",
+        "oscillation_value_template": "{{ value_json.value if value_json is defined and value_json != None and value_json.value != None and value_json.type | default('passive') == 'passive' else 'unknown' }}",
         "payload_available": "online",
         "payload_not_available": "offline",
         "payload_off": "false",
         "payload_on": "true",
         "percentage_command_topic": "rustuya/command/set/synth_fan_01/2",
         "percentage_state_topic": "rustuya/event/synth_fan_01/2",
-        "percentage_value_template": "{{ value_json.value if value_json is defined and value_json != None and value_json.value != None else 'unknown' }}",
+        "percentage_value_template": "{{ value_json.value if value_json is defined and value_json != None and value_json.value != None and value_json.type | default('passive') == 'passive' else 'unknown' }}",
         "state_topic": "rustuya/event/synth_fan_01/1",
-        "state_value_template": "{{ value_json.value if value_json is defined and value_json != None and value_json.value != None else 'unknown' }}",
+        "state_value_template": "{{ value_json.value if value_json is defined and value_json != None and value_json.value != None and value_json.type | default('passive') == 'passive' else 'unknown' }}",
         "unique_id": "synth_fan_01_fan"
       }
     },
@@ -154,10 +154,10 @@
         "availability_topic": "rustuya/error/synth_light_01",
         "brightness_command_topic": "rustuya/command/set/synth_light_01/2",
         "brightness_state_topic": "rustuya/event/synth_light_01/2",
-        "brightness_value_template": "{{ value_json.value if value_json is defined and value_json != None and value_json.value != None else 'unknown' }}",
+        "brightness_value_template": "{{ value_json.value if value_json is defined and value_json != None and value_json.value != None and value_json.type | default('passive') == 'passive' else 'unknown' }}",
         "color_temp_command_topic": "rustuya/command/set/synth_light_01/3",
         "color_temp_state_topic": "rustuya/event/synth_light_01/3",
-        "color_temp_value_template": "{{ value_json.value if value_json is defined and value_json != None and value_json.value != None else 'unknown' }}",
+        "color_temp_value_template": "{{ value_json.value if value_json is defined and value_json != None and value_json.value != None and value_json.type | default('passive') == 'passive' else 'unknown' }}",
         "command_topic": "rustuya/command/set/synth_light_01/1",
         "device": {
           "identifiers": [
@@ -173,7 +173,7 @@
         "payload_off": "false",
         "payload_on": "true",
         "state_topic": "rustuya/event/synth_light_01/1",
-        "state_value_template": "{{ value_json.value if value_json is defined and value_json != None and value_json.value != None else 'unknown' }}",
+        "state_value_template": "{{ value_json.value if value_json is defined and value_json != None and value_json.value != None and value_json.type | default('passive') == 'passive' else 'unknown' }}",
         "unique_id": "synth_light_01_light"
       }
     },
