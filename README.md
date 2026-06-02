@@ -74,9 +74,13 @@ rustuya-manager) > the legacy default. Derivation handles:
   topic; `value_template` indexes by DP).
 - **value path**: `value_template` points at wherever `{value}`/`{dps}` sits in
   the payload template (e.g. `{"value":{value}}` → `value_json.value`).
-- **active vs passive** (`{type}` in the event topic): `event` entities read the
-  `active` topic, stateful entities read the retained `passive` snapshot — per
-  the bridge's event model.
+- **active vs passive**: `event` entities consume the momentary `active` push;
+  stateful entities read only the retained `passive` snapshot. This holds for any
+  config — if the event topic separates `{type}` the topics do it; if active and
+  passive share a topic, the `value_template` drops `active` messages instead.
+  The drop is applied only when `mqtt_retain` is on (a passive snapshot is
+  guaranteed to follow) and the payload carries `{type}` (so the two can be told
+  apart); otherwise stateful entities accept whatever arrives.
 
 The `LEGACY` profile in `core/bridge.py` is the bridge config that reproduces the
 historical output; `tests/test_bridge_scheme_legacy.py` asserts it stays

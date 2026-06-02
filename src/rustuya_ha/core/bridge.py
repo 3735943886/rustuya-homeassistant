@@ -119,6 +119,7 @@ class BridgeConfig:
     event_topic: str = DEFAULTS["event_topic"]
     message_topic: str = DEFAULTS["message_topic"]
     payload_template: str = DEFAULTS["payload_template"]
+    retain: bool = False  # mqtt_retain: true => active delta + retained passive snapshot
 
     @classmethod
     def from_dict(cls, cfg: Dict[str, Any]) -> "BridgeConfig":
@@ -133,6 +134,7 @@ class BridgeConfig:
             event_topic=g("mqtt_event_topic", DEFAULTS["event_topic"]),
             message_topic=g("mqtt_message_topic", DEFAULTS["message_topic"]),
             payload_template=g("mqtt_payload_template", DEFAULTS["payload_template"]),
+            retain=bool(cfg.get("mqtt_retain", False)),
         )
 
     @classmethod
@@ -161,6 +163,15 @@ class BridgeConfig:
     def type_path(self) -> Optional[List[Any]]:
         return placeholder_path(self.payload_template, "type")
 
+    @property
+    def skip_active(self) -> bool:
+        """Whether stateful value_templates should ignore `active` messages and
+        read only the retained `passive` snapshot. Safe only when retain is on
+        (passive is guaranteed to follow) AND the payload carries `{type}` (so we
+        can tell active from passive). Works regardless of whether the event
+        topic also separates {type} — there it's simply redundant."""
+        return self.retain and self.type_path() is not None
+
 
 LEGACY_DICT = {
     "mqtt_root_topic": "rustuya",
@@ -168,6 +179,7 @@ LEGACY_DICT = {
     "mqtt_event_topic": "{root}/event/{id}/{dp}",
     "mqtt_message_topic": "{root}/{level}/{id}",
     "mqtt_payload_template": '{"type": "{type}", "value": {value}, "name": "{name}"}',
+    "mqtt_retain": True,
 }
 # The config that reproduces the pre-refactor hardcoded output (see tests).
 LEGACY = BridgeConfig.from_dict(LEGACY_DICT)

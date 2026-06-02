@@ -33,9 +33,13 @@ def test_availability_template_offline_branch():
 def test_value_template_event_and_switch_and_scale():
     c = DefaultPayloadCodec()
     assert "event_type" in c.value_template("event")
+    # stateful entities ignore `active` (passive-only) and read value on passive.
     assert c.value_template("switch") == (
-        "{{ 'true' if value_json is defined and value_json != None and value_json.value != None "
+        "{{ '' if value_json.type | default('') == 'active' else "
+        "'true' if value_json is defined and value_json != None and value_json.value != None "
         "and value_json.value == true else 'false' if value_json is defined and value_json != None "
         "and value_json.value != None and value_json.value == false else 'unknown' }}"
     )
     assert "/ 10) | round(1)" in c.value_template("sensor", scale=1)
+    # event template is unchanged — it still keeps active.
+    assert c.value_template("event").endswith("== 'active' else '' }}")

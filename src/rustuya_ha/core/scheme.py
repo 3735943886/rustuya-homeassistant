@@ -42,32 +42,40 @@ def build_availability_template() -> str:
 def build_value_template(comp: str, scale: int = 0,
                          val_map: Optional[Dict[str, Any]] = None,
                          value_expr: str = LEGACY_VALUE_EXPR,
-                         type_expr: str = LEGACY_TYPE_EXPR) -> str:
-    """Jinja value_template reading the device's MQTT state payload. With the
-    legacy accessors this reproduces the original hardcoded strings exactly."""
+                         type_expr: str = LEGACY_TYPE_EXPR,
+                         skip_active: bool = False) -> str:
+    """Jinja value_template reading the device's MQTT state payload.
+
+    ``event`` entities consume momentary `active` pushes (unchanged). For stateful
+    entities, ``skip_active`` makes the template ignore `active` messages (render
+    '' so HA drops the update) and read only the retained `passive` snapshot —
+    used when active+passive arrive on the same topic under retain mode."""
     guard = "value_json is defined and value_json != None and %s != None" % value_expr
     if comp == "event":
         return ("{{ { \"event_type\": %s } | to_json if %s and %s | default('') == 'active' else '' }}"
                 % (value_expr, guard, type_expr))
 
     if comp in ["binary_sensor", "switch"] and not val_map:
-        return ("{{ 'true' if %s and %s == true else 'false' if %s and %s == false else 'unknown' }}"
-                % (guard, value_expr, guard, value_expr))
-
-    base = value_expr
-    if scale > 0:
-        expr = "((%s | float) / %g) | round(1)" % (base, 10 ** scale)
+        inner = ("'true' if %s and %s == true else 'false' if %s and %s == false else 'unknown'"
+                 % (guard, value_expr, guard, value_expr))
     else:
-        expr = base
+        base = value_expr
+        if scale > 0:
+            expr = "((%s | float) / %g) | round(1)" % (base, 10 ** scale)
+        else:
+            expr = base
+        if val_map:
+            map_str = json.dumps(val_map)
+            mapped_expr = "(%s | string | lower)" % expr
+            final_expr = "%s[%s] | default(%s)" % (map_str, mapped_expr, mapped_expr)
+        else:
+            final_expr = expr
+        inner = "%s if %s else 'unknown'" % (final_expr, guard)
 
-    if val_map:
-        map_str = json.dumps(val_map)
-        mapped_expr = "(%s | string | lower)" % expr
-        final_expr = "%s[%s] | default(%s)" % (map_str, mapped_expr, mapped_expr)
-    else:
-        final_expr = expr
-
-    return "{{ %s if %s else 'unknown' }}" % (final_expr, guard)
+    if skip_active:
+        # `X if a else Y if b else Z` binds right, so prefixing is enough.
+        inner = "'' if %s | default('') == 'active' else %s" % (type_expr, inner)
+    return "{{ %s }}" % inner
 
 
 # --- TopicScheme ---
@@ -144,7 +152,8 @@ class PayloadCodec(Protocol):
 
 
 class DefaultPayloadCodec:
-    """Templates for the historical payload shape (unchanged output)."""
+    """Templates for the historical payload shape. Legacy ran with retain=true and
+    a {type}-carrying payload, so stateful entities read passive only."""
 
     def availability_template(self) -> str:
         return build_availability_template()
@@ -152,7 +161,7 @@ class DefaultPayloadCodec:
     def value_template(self, comp: str, scale: int = 0,
                        val_map: Optional[Dict[str, Any]] = None,
                        dp_id: Optional[str] = None) -> str:
-        return build_value_template(comp, scale, val_map)
+        return build_value_template(comp, scale, val_map, skip_active=True)
 
 
 class BridgePayloadCodec:
@@ -170,6 +179,7 @@ class BridgePayloadCodec:
         tpath = config.type_path()
         self._type_expr = (jinja_accessor("value_json", tpath)
                            if tpath is not None else LEGACY_TYPE_EXPR)
+        self._skip_active = config.skip_active
 
     def availability_template(self) -> str:
         return build_availability_template()
@@ -179,7 +189,8 @@ class BridgePayloadCodec:
                        dp_id: Optional[str] = None) -> str:
         index = None if self._per_dp else (str(dp_id) if dp_id is not None else None)
         value_expr = jinja_accessor("value_json", self._value_path, index=index)
-        return build_value_template(comp, scale, val_map, value_expr, self._type_expr)
+        return build_value_template(comp, scale, val_map, value_expr,
+                                    self._type_expr, skip_active=self._skip_active)
 
 
 def scheme_for(config: BridgeConfig):

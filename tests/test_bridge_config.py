@@ -85,6 +85,21 @@ def test_bridge_topic_scheme_multi_dp_same_device_topic():
     assert s.state("dev", "1") == s.state("dev", "2") == "rustuya/event/passive/dev"
 
 
+def test_skip_active_gating():
+    """Stateful entities go passive-only ONLY when retain=true AND payload carries
+    {type}; otherwise they must accept whatever arrives (any config supported)."""
+    def vt(cfg):
+        return BridgePayloadCodec(BridgeConfig.from_dict(cfg)).value_template("sensor", dp_id="2")
+
+    base = {"mqtt_event_topic": "{root}/event/{id}/{dp}"}
+    with_type = {**base, "mqtt_payload_template": '{"type":"{type}","value":{value}}'}
+    no_type = {**base, "mqtt_payload_template": '{"value":{value}}'}
+
+    assert "== 'active' else" in vt({**with_type, "mqtt_retain": True})    # skip
+    assert "== 'active' else" not in vt({**with_type, "mqtt_retain": False})  # no passive -> no skip
+    assert "== 'active' else" not in vt({**no_type, "mqtt_retain": True})     # can't tell -> no skip
+
+
 def test_state_active_vs_passive_topic():
     # bridge README: event entities read active topic, stateful entities passive.
     s = BridgeTopicScheme(BridgeConfig.from_dict({"mqtt_event_topic": "{root}/event/{type}/{id}/{dp}"}))
