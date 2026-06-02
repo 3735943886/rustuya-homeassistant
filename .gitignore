@@ -1,4 +1,9 @@
 __pycache__/
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.venv/
 *.json
 !custom_converters.json
 !tests/fixtures/synthetic_devices.json

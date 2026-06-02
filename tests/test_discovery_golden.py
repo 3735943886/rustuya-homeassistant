@@ -23,9 +23,9 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "src"))
 
-from tuya_discovery_generator import initialize_generator  # noqa: E402
+from rustuya_ha import initialize_generator  # noqa: E402
 
 REAL_DEVICES_PATH = ROOT / "tuyadevices.json"
 SYNTH_DEVICES_PATH = Path(__file__).parent / "fixtures" / "synthetic_devices.json"

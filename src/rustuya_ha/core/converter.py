@@ -26,17 +26,36 @@ into the DP's metadata bag (scale/min/max/options/val_map/etc.).
 """
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger("user_converter")
 
-DEFAULT_PATH = "custom_converters.json"
+FILENAME = "custom_converters.json"
+ENV_VAR = "RUSTUYA_CONVERTERS"
+# Bundled example used when no user file is found on disk.
+PACKAGED_PATH = Path(__file__).resolve().parent.parent / "data" / FILENAME
+
+
+def resolve_path(path: Optional[str] = None) -> Path:
+    """Resolution order: explicit arg > $RUSTUYA_CONVERTERS > ./custom_converters.json
+    > packaged example. The CWD file is kept first so existing workflows (and the
+    golden snapshots generated from the repo-root file) stay unchanged."""
+    if path:
+        return Path(path)
+    env = os.environ.get(ENV_VAR)
+    if env:
+        return Path(env)
+    cwd = Path(FILENAME)
+    if cwd.exists():
+        return cwd
+    return PACKAGED_PATH
 
 
 class UserConverter:
     def __init__(self, path: Optional[str] = None):
-        self.path = Path(path or DEFAULT_PATH)
+        self.path = resolve_path(path)
         self.mapping: Dict[str, Any] = {}
         self._load()
 

@@ -2,28 +2,15 @@ import json
 import re
 import logging
 from typing import Dict, Any, Optional, Set, Tuple
-from tuya_mapping import (
+from .mapping import (
     UNIT_NORM_MAP, DEFAULT_UNITS_BY_CLASS,
     DP_CODE_MAP, GENERIC_MAP, PROPERTY_MAP, CATEGORY_MAP, COMPLEX_SIGNATURES,
-    UNAVAILABLE_ERROR_CODES,
 )
-from user_converter import UserConverter
-
-# --- Constants & Configuration ---
-class Config:
-    HA_DISCOVERY_TOPIC = "homeassistant/{}/{}_{}/config"
-    HA_STATE_TOPIC = "rustuya/event/{}/{}"
-    HA_COMMAND_TOPIC = "rustuya/command/set/{}/{}"
-    HA_ERROR_TOPIC = "rustuya/error/{}"
-    DEFAULT_MANUFACTURER = "rustuya"
-
-    # entity unavailable로 만드는 errorCode 목록은 tuya_mapping.UNAVAILABLE_ERROR_CODES에서 관리.
-    # 코드 분류 근거는 tuya_mapping.ERROR_CODES 사전과 인접 주석 참조.
-    AVAILABILITY_TEMPLATE = (
-        "{{ 'offline' if value_json is defined and value_json != None "
-        "and value_json.errorCode in " + json.dumps(sorted(UNAVAILABLE_ERROR_CODES)) +
-        " else 'online' }}"
-    )
+from .converter import UserConverter
+from .scheme import (
+    TopicScheme, PayloadCodec, DefaultTopicScheme, DefaultPayloadCodec,
+    DEFAULT_MANUFACTURER,
+)
 
 logger = logging.getLogger("tuya_discovery")
 
@@ -31,8 +18,14 @@ logger = logging.getLogger("tuya_discovery")
 # --- Discovery Generator ---
 
 class DiscoveryGenerator:
-    def __init__(self, converter: Optional[UserConverter] = None):
+    def __init__(self, converter: Optional[UserConverter] = None,
+                 scheme: Optional[TopicScheme] = None,
+                 codec: Optional[PayloadCodec] = None):
         self.converter = converter or UserConverter()
+        # Topic layout + payload shape seams (#2 injection point). Defaults
+        # reproduce the historical hardcoded behaviour byte-for-byte.
+        self.scheme: TopicScheme = scheme or DefaultTopicScheme()
+        self.codec: PayloadCodec = codec or DefaultPayloadCodec()
 
     # --- Public ---
 
@@ -113,30 +106,6 @@ class DiscoveryGenerator:
             if re.match(pattern, obj["code"]): return d_id
         return None
 
-    @staticmethod
-    def _value_template(comp: str, scale: int = 0, val_map: Optional[Dict[str, Any]] = None) -> str:
-        guard = "value_json is defined and value_json != None and value_json.value != None"
-        if comp == "event":
-            return "{{ { \"event_type\": value_json.value } | to_json if %s and value_json.type | default('') == 'active' else '' }}" % guard
-
-        if comp in ["binary_sensor", "switch"] and not val_map:
-            return "{{ 'true' if %s and value_json.value == true else 'false' if %s and value_json.value == false else 'unknown' }}" % (guard, guard)
-
-        base = "value_json.value"
-        if scale > 0:
-            expr = "((%s | float) / %g) | round(1)" % (base, 10 ** scale)
-        else:
-            expr = base
-
-        if val_map:
-            map_str = json.dumps(val_map)
-            mapped_expr = "(%s | string | lower)" % expr
-            final_expr = "%s[%s] | default(%s)" % (map_str, mapped_expr, mapped_expr)
-        else:
-            final_expr = expr
-
-        return "{{ %s if %s else 'unknown' }}" % (final_expr, guard)
-
     @classmethod
     def _check_signature(cls, dps: Dict[str, Any], comp_type: str):
         sig = COMPLEX_SIGNATURES.get(comp_type)
@@ -159,11 +128,11 @@ class DiscoveryGenerator:
         results: Dict[str, Any] = {}
         consumed: Set[str] = set()
         model = info.get('model', category)
-        common_device = {"identifiers": [dev_id], "name": name, "manufacturer": Config.DEFAULT_MANUFACTURER, "model": model}
+        common_device = {"identifiers": [dev_id], "name": name, "manufacturer": DEFAULT_MANUFACTURER, "model": model}
         avail_id = parent_id or dev_id
         avail = {
-            "availability_topic": Config.HA_ERROR_TOPIC.format(avail_id),
-            "availability_template": Config.AVAILABILITY_TEMPLATE,
+            "availability_topic": self.scheme.availability(avail_id),
+            "availability_template": self.codec.availability_template(),
             "payload_available": "online", "payload_not_available": "offline"
         }
 
@@ -183,60 +152,60 @@ class DiscoveryGenerator:
                 if category == 'cl': payload["device_class"] = "curtain"
                 elif category == 'mc': payload["device_class"] = "window"
                 if c_dp:
-                    payload["command_topic"] = Config.HA_COMMAND_TOPIC.format(dev_id, c_dp)
+                    payload["command_topic"] = self.scheme.command(dev_id, c_dp)
                     if dps[c_dp]["code"] in ["state", "control", "mach_operate"]:
-                        payload.update({"state_topic": Config.HA_STATE_TOPIC.format(dev_id, c_dp), "value_template": self._value_template("cover")})
+                        payload.update({"state_topic": self.scheme.state(dev_id, c_dp), "value_template": self.codec.value_template("cover")})
                     consumed.add(c_dp)
                 if p_dp:
-                    payload.update({"set_position_topic": Config.HA_COMMAND_TOPIC.format(dev_id, p_dp), "position_topic": Config.HA_STATE_TOPIC.format(dev_id, s_dp or p_dp), "position_template": self._value_template("cover")})
+                    payload.update({"set_position_topic": self.scheme.command(dev_id, p_dp), "position_topic": self.scheme.state(dev_id, s_dp or p_dp), "position_template": self.codec.value_template("cover")})
                     consumed.update([p_dp, s_dp] if s_dp else [p_dp])
-                results[Config.HA_DISCOVERY_TOPIC.format("cover", dev_id, "motor")] = payload
+                results[self.scheme.discovery("cover", dev_id, "motor")] = payload
 
     def _build_climate(self, dev_id, category, dps, common_device, avail, consumed, results):
         if CATEGORY_MAP.get(category) == 'climate' or self._check_signature(dps, 'climate'):
             t_set, t_cur, mode, sw = self._find_dp(dps, r'^(temp_set|occupied_heating_setpoint)$'), self._find_dp(dps, r'^(temp_current|local_temperature)$'), self._find_dp(dps, r'^(mode|system_mode)$'), self._find_dp(dps, r'^switch$')
             if t_set and t_cur:
                 payload = {"name": None, "unique_id": f"{dev_id}_climate", "device": common_device, **avail}
-                payload.update({"temperature_command_topic": Config.HA_COMMAND_TOPIC.format(dev_id, t_set), "temperature_state_topic": Config.HA_STATE_TOPIC.format(dev_id, t_set), "temperature_state_template": self._value_template("climate", dps[t_set]['meta'].get('scale', 0))})
-                payload.update({"current_temperature_topic": Config.HA_STATE_TOPIC.format(dev_id, t_cur), "current_temperature_template": self._value_template("climate", dps[t_cur]['meta'].get('scale', 0))})
+                payload.update({"temperature_command_topic": self.scheme.command(dev_id, t_set), "temperature_state_topic": self.scheme.state(dev_id, t_set), "temperature_state_template": self.codec.value_template("climate", dps[t_set]['meta'].get('scale', 0))})
+                payload.update({"current_temperature_topic": self.scheme.state(dev_id, t_cur), "current_temperature_template": self.codec.value_template("climate", dps[t_cur]['meta'].get('scale', 0))})
                 consumed.update([t_set, t_cur])
                 if mode:
-                    payload.update({"mode_command_topic": Config.HA_COMMAND_TOPIC.format(dev_id, mode), "mode_state_topic": Config.HA_STATE_TOPIC.format(dev_id, mode), "mode_state_template": self._value_template("climate")})
+                    payload.update({"mode_command_topic": self.scheme.command(dev_id, mode), "mode_state_topic": self.scheme.state(dev_id, mode), "mode_state_template": self.codec.value_template("climate")})
                     consumed.add(mode)
                 if sw:
-                    payload["power_command_topic"] = Config.HA_COMMAND_TOPIC.format(dev_id, sw)
+                    payload["power_command_topic"] = self.scheme.command(dev_id, sw)
                     consumed.add(sw)
-                results[Config.HA_DISCOVERY_TOPIC.format("climate", dev_id, "thermostat")] = payload
+                results[self.scheme.discovery("climate", dev_id, "thermostat")] = payload
 
     def _build_fan(self, dev_id, category, dps, common_device, avail, consumed, results):
         if CATEGORY_MAP.get(category) == 'fan' or self._check_signature(dps, 'fan'):
             sp_dp, sw_dp, osc_dp = self._find_dp(dps, r'^(fan_speed|fan_mode)$'), self._find_dp(dps, r'^switch$'), self._find_dp(dps, r'^fan_horizontal$')
             if sp_dp:
                 payload = {"name": None, "unique_id": f"{dev_id}_fan", "device": common_device, **avail}
-                payload.update({"percentage_command_topic": Config.HA_COMMAND_TOPIC.format(dev_id, sp_dp), "percentage_state_topic": Config.HA_STATE_TOPIC.format(dev_id, sp_dp), "percentage_value_template": self._value_template("fan")})
+                payload.update({"percentage_command_topic": self.scheme.command(dev_id, sp_dp), "percentage_state_topic": self.scheme.state(dev_id, sp_dp), "percentage_value_template": self.codec.value_template("fan")})
                 consumed.add(sp_dp)
                 if sw_dp:
-                    payload.update({"command_topic": Config.HA_COMMAND_TOPIC.format(dev_id, sw_dp), "state_topic": Config.HA_STATE_TOPIC.format(dev_id, sw_dp), "state_value_template": self._value_template("fan"), "payload_on": "true", "payload_off": "false"})
+                    payload.update({"command_topic": self.scheme.command(dev_id, sw_dp), "state_topic": self.scheme.state(dev_id, sw_dp), "state_value_template": self.codec.value_template("fan"), "payload_on": "true", "payload_off": "false"})
                     consumed.add(sw_dp)
                 if osc_dp:
-                    payload.update({"oscillation_command_topic": Config.HA_COMMAND_TOPIC.format(dev_id, osc_dp), "oscillation_state_topic": Config.HA_STATE_TOPIC.format(dev_id, osc_dp), "oscillation_value_template": self._value_template("fan"), "payload_on": "true", "payload_off": "false"})
+                    payload.update({"oscillation_command_topic": self.scheme.command(dev_id, osc_dp), "oscillation_state_topic": self.scheme.state(dev_id, osc_dp), "oscillation_value_template": self.codec.value_template("fan"), "payload_on": "true", "payload_off": "false"})
                     consumed.add(osc_dp)
-                results[Config.HA_DISCOVERY_TOPIC.format("fan", dev_id, "fan")] = payload
+                results[self.scheme.discovery("fan", dev_id, "fan")] = payload
 
     def _build_light(self, dev_id, category, dps, common_device, avail, consumed, results):
         if CATEGORY_MAP.get(category) == 'light' or self._check_signature(dps, 'light'):
             sw_dp, br_dp, tm_dp = self._find_dp(dps, r'^(switch_led|switch)$'), self._find_dp(dps, r'^(bright_value|brightness)$'), self._find_dp(dps, r'^(temp_value|color_temp)$')
             if br_dp:
                 payload = {"name": None, "unique_id": f"{dev_id}_light", "device": common_device, **avail}
-                payload.update({"brightness_command_topic": Config.HA_COMMAND_TOPIC.format(dev_id, br_dp), "brightness_state_topic": Config.HA_STATE_TOPIC.format(dev_id, br_dp), "brightness_value_template": self._value_template("light")})
+                payload.update({"brightness_command_topic": self.scheme.command(dev_id, br_dp), "brightness_state_topic": self.scheme.state(dev_id, br_dp), "brightness_value_template": self.codec.value_template("light")})
                 consumed.add(br_dp)
                 if sw_dp:
-                    payload.update({"command_topic": Config.HA_COMMAND_TOPIC.format(dev_id, sw_dp), "state_topic": Config.HA_STATE_TOPIC.format(dev_id, sw_dp), "payload_on": "true", "payload_off": "false", "state_value_template": self._value_template("light")})
+                    payload.update({"command_topic": self.scheme.command(dev_id, sw_dp), "state_topic": self.scheme.state(dev_id, sw_dp), "payload_on": "true", "payload_off": "false", "state_value_template": self.codec.value_template("light")})
                     consumed.add(sw_dp)
                 if tm_dp:
-                    payload.update({"color_temp_command_topic": Config.HA_COMMAND_TOPIC.format(dev_id, tm_dp), "color_temp_state_topic": Config.HA_STATE_TOPIC.format(dev_id, tm_dp), "color_temp_value_template": self._value_template("light")})
+                    payload.update({"color_temp_command_topic": self.scheme.command(dev_id, tm_dp), "color_temp_state_topic": self.scheme.state(dev_id, tm_dp), "color_temp_value_template": self.codec.value_template("light")})
                     consumed.add(tm_dp)
-                results[Config.HA_DISCOVERY_TOPIC.format("light", dev_id, "led")] = payload
+                results[self.scheme.discovery("light", dev_id, "led")] = payload
 
     def _build_individual(self, dev_id, category, dps, functions, common_device, avail, consumed, results):
         cat_map = GENERIC_MAP.get(category, {})
@@ -253,14 +222,14 @@ class DiscoveryGenerator:
                 else: ent_info = ("sensor", None, None, None)
 
             comp, dev_cls, unit, icon = ent_info
-            payload = {"name": str(code).replace("_", " ").capitalize(), "unique_id": f"{dev_id}_{code}", "state_topic": Config.HA_STATE_TOPIC.format(dev_id, d_id), "device": common_device, **avail}
+            payload = {"name": str(code).replace("_", " ").capitalize(), "unique_id": f"{dev_id}_{code}", "state_topic": self.scheme.state(dev_id, d_id), "device": common_device, **avail}
             if dev_cls: payload["device_class"] = dev_cls
             final_unit = self._normalize_unit(meta.get('unit'), dev_cls) or self._normalize_unit(unit, dev_cls) or DEFAULT_UNITS_BY_CLASS.get(dev_cls)
             if final_unit: payload["unit_of_measurement"] = final_unit
             if icon: payload["icon"] = icon
 
             # JSON Payload & Scaling & Mapping
-            payload["value_template"] = self._value_template(comp, meta.get('scale', 0), meta.get('val_map'))
+            payload["value_template"] = self.codec.value_template(comp, meta.get('scale', 0), meta.get('val_map'))
 
             if comp == "number":
                 scale = meta.get('scale', 0)
@@ -280,8 +249,8 @@ class DiscoveryGenerator:
                     payload["event_types"] = event_types + ["single_click", "double_click", "long_press"]
 
             if comp in ["binary_sensor", "switch"]: payload.update({"payload_on": "true", "payload_off": "false"})
-            if comp not in ['sensor', 'binary_sensor', 'event']: payload["command_topic"] = Config.HA_COMMAND_TOPIC.format(dev_id, d_id)
-            results[Config.HA_DISCOVERY_TOPIC.format(comp, dev_id, code)] = payload
+            if comp not in ['sensor', 'binary_sensor', 'event']: payload["command_topic"] = self.scheme.command(dev_id, d_id)
+            results[self.scheme.discovery(comp, dev_id, code)] = payload
 
 
 def initialize_generator(custom_path: Optional[str] = None) -> DiscoveryGenerator:
