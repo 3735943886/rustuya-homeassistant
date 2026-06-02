@@ -115,15 +115,9 @@ class DiscoveryGenerator:
 
     @staticmethod
     def _value_template(comp: str, scale: int = 0, val_map: Optional[Dict[str, Any]] = None) -> str:
-        # rustuya-bridge publishes both active and passive for every state change.
-        # event entities consume the active edge (button trigger); everything else
-        # reads the passive snapshot to avoid double-processing the same value.
-        # default('passive') keeps backward-compat with payloads missing the type field.
-        base_guard = "value_json is defined and value_json != None and value_json.value != None"
+        guard = "value_json is defined and value_json != None and value_json.value != None"
         if comp == "event":
-            return "{{ { \"event_type\": value_json.value } | to_json if %s and value_json.type | default('') == 'active' else '' }}" % base_guard
-
-        guard = "%s and value_json.type | default('passive') == 'passive'" % base_guard
+            return "{{ { \"event_type\": value_json.value } | to_json if %s and value_json.type | default('') == 'active' else '' }}" % guard
 
         if comp in ["binary_sensor", "switch"] and not val_map:
             return "{{ 'true' if %s and value_json.value == true else 'false' if %s and value_json.value == false else 'unknown' }}" % (guard, guard)
