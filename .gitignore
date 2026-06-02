@@ -7,4 +7,5 @@ dist/
 *.json
 !custom_converters.json
 !tests/fixtures/synthetic_devices.json
+!tests/fixtures/legacy_bridge_config.json
 !tests/golden/synthetic_snapshots.json

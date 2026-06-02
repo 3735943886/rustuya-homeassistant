@@ -154,10 +154,10 @@ class DiscoveryGenerator:
                 if c_dp:
                     payload["command_topic"] = self.scheme.command(dev_id, c_dp)
                     if dps[c_dp]["code"] in ["state", "control", "mach_operate"]:
-                        payload.update({"state_topic": self.scheme.state(dev_id, c_dp), "value_template": self.codec.value_template("cover")})
+                        payload.update({"state_topic": self.scheme.state(dev_id, c_dp), "value_template": self.codec.value_template("cover", dp_id=c_dp)})
                     consumed.add(c_dp)
                 if p_dp:
-                    payload.update({"set_position_topic": self.scheme.command(dev_id, p_dp), "position_topic": self.scheme.state(dev_id, s_dp or p_dp), "position_template": self.codec.value_template("cover")})
+                    payload.update({"set_position_topic": self.scheme.command(dev_id, p_dp), "position_topic": self.scheme.state(dev_id, s_dp or p_dp), "position_template": self.codec.value_template("cover", dp_id=s_dp or p_dp)})
                     consumed.update([p_dp, s_dp] if s_dp else [p_dp])
                 results[self.scheme.discovery("cover", dev_id, "motor")] = payload
 
@@ -166,11 +166,11 @@ class DiscoveryGenerator:
             t_set, t_cur, mode, sw = self._find_dp(dps, r'^(temp_set|occupied_heating_setpoint)$'), self._find_dp(dps, r'^(temp_current|local_temperature)$'), self._find_dp(dps, r'^(mode|system_mode)$'), self._find_dp(dps, r'^switch$')
             if t_set and t_cur:
                 payload = {"name": None, "unique_id": f"{dev_id}_climate", "device": common_device, **avail}
-                payload.update({"temperature_command_topic": self.scheme.command(dev_id, t_set), "temperature_state_topic": self.scheme.state(dev_id, t_set), "temperature_state_template": self.codec.value_template("climate", dps[t_set]['meta'].get('scale', 0))})
-                payload.update({"current_temperature_topic": self.scheme.state(dev_id, t_cur), "current_temperature_template": self.codec.value_template("climate", dps[t_cur]['meta'].get('scale', 0))})
+                payload.update({"temperature_command_topic": self.scheme.command(dev_id, t_set), "temperature_state_topic": self.scheme.state(dev_id, t_set), "temperature_state_template": self.codec.value_template("climate", dps[t_set]['meta'].get('scale', 0), dp_id=t_set)})
+                payload.update({"current_temperature_topic": self.scheme.state(dev_id, t_cur), "current_temperature_template": self.codec.value_template("climate", dps[t_cur]['meta'].get('scale', 0), dp_id=t_cur)})
                 consumed.update([t_set, t_cur])
                 if mode:
-                    payload.update({"mode_command_topic": self.scheme.command(dev_id, mode), "mode_state_topic": self.scheme.state(dev_id, mode), "mode_state_template": self.codec.value_template("climate")})
+                    payload.update({"mode_command_topic": self.scheme.command(dev_id, mode), "mode_state_topic": self.scheme.state(dev_id, mode), "mode_state_template": self.codec.value_template("climate", dp_id=mode)})
                     consumed.add(mode)
                 if sw:
                     payload["power_command_topic"] = self.scheme.command(dev_id, sw)
@@ -182,13 +182,13 @@ class DiscoveryGenerator:
             sp_dp, sw_dp, osc_dp = self._find_dp(dps, r'^(fan_speed|fan_mode)$'), self._find_dp(dps, r'^switch$'), self._find_dp(dps, r'^fan_horizontal$')
             if sp_dp:
                 payload = {"name": None, "unique_id": f"{dev_id}_fan", "device": common_device, **avail}
-                payload.update({"percentage_command_topic": self.scheme.command(dev_id, sp_dp), "percentage_state_topic": self.scheme.state(dev_id, sp_dp), "percentage_value_template": self.codec.value_template("fan")})
+                payload.update({"percentage_command_topic": self.scheme.command(dev_id, sp_dp), "percentage_state_topic": self.scheme.state(dev_id, sp_dp), "percentage_value_template": self.codec.value_template("fan", dp_id=sp_dp)})
                 consumed.add(sp_dp)
                 if sw_dp:
-                    payload.update({"command_topic": self.scheme.command(dev_id, sw_dp), "state_topic": self.scheme.state(dev_id, sw_dp), "state_value_template": self.codec.value_template("fan"), "payload_on": "true", "payload_off": "false"})
+                    payload.update({"command_topic": self.scheme.command(dev_id, sw_dp), "state_topic": self.scheme.state(dev_id, sw_dp), "state_value_template": self.codec.value_template("fan", dp_id=sw_dp), "payload_on": "true", "payload_off": "false"})
                     consumed.add(sw_dp)
                 if osc_dp:
-                    payload.update({"oscillation_command_topic": self.scheme.command(dev_id, osc_dp), "oscillation_state_topic": self.scheme.state(dev_id, osc_dp), "oscillation_value_template": self.codec.value_template("fan"), "payload_on": "true", "payload_off": "false"})
+                    payload.update({"oscillation_command_topic": self.scheme.command(dev_id, osc_dp), "oscillation_state_topic": self.scheme.state(dev_id, osc_dp), "oscillation_value_template": self.codec.value_template("fan", dp_id=osc_dp), "payload_on": "true", "payload_off": "false"})
                     consumed.add(osc_dp)
                 results[self.scheme.discovery("fan", dev_id, "fan")] = payload
 
@@ -197,13 +197,13 @@ class DiscoveryGenerator:
             sw_dp, br_dp, tm_dp = self._find_dp(dps, r'^(switch_led|switch)$'), self._find_dp(dps, r'^(bright_value|brightness)$'), self._find_dp(dps, r'^(temp_value|color_temp)$')
             if br_dp:
                 payload = {"name": None, "unique_id": f"{dev_id}_light", "device": common_device, **avail}
-                payload.update({"brightness_command_topic": self.scheme.command(dev_id, br_dp), "brightness_state_topic": self.scheme.state(dev_id, br_dp), "brightness_value_template": self.codec.value_template("light")})
+                payload.update({"brightness_command_topic": self.scheme.command(dev_id, br_dp), "brightness_state_topic": self.scheme.state(dev_id, br_dp), "brightness_value_template": self.codec.value_template("light", dp_id=br_dp)})
                 consumed.add(br_dp)
                 if sw_dp:
-                    payload.update({"command_topic": self.scheme.command(dev_id, sw_dp), "state_topic": self.scheme.state(dev_id, sw_dp), "payload_on": "true", "payload_off": "false", "state_value_template": self.codec.value_template("light")})
+                    payload.update({"command_topic": self.scheme.command(dev_id, sw_dp), "state_topic": self.scheme.state(dev_id, sw_dp), "payload_on": "true", "payload_off": "false", "state_value_template": self.codec.value_template("light", dp_id=sw_dp)})
                     consumed.add(sw_dp)
                 if tm_dp:
-                    payload.update({"color_temp_command_topic": self.scheme.command(dev_id, tm_dp), "color_temp_state_topic": self.scheme.state(dev_id, tm_dp), "color_temp_value_template": self.codec.value_template("light")})
+                    payload.update({"color_temp_command_topic": self.scheme.command(dev_id, tm_dp), "color_temp_state_topic": self.scheme.state(dev_id, tm_dp), "color_temp_value_template": self.codec.value_template("light", dp_id=tm_dp)})
                     consumed.add(tm_dp)
                 results[self.scheme.discovery("light", dev_id, "led")] = payload
 
@@ -222,14 +222,15 @@ class DiscoveryGenerator:
                 else: ent_info = ("sensor", None, None, None)
 
             comp, dev_cls, unit, icon = ent_info
-            payload = {"name": str(code).replace("_", " ").capitalize(), "unique_id": f"{dev_id}_{code}", "state_topic": self.scheme.state(dev_id, d_id), "device": common_device, **avail}
+            # HA `event` entities consume momentary device-initiated pushes -> active topic.
+            payload = {"name": str(code).replace("_", " ").capitalize(), "unique_id": f"{dev_id}_{code}", "state_topic": self.scheme.state(dev_id, d_id, active=(comp == "event")), "device": common_device, **avail}
             if dev_cls: payload["device_class"] = dev_cls
             final_unit = self._normalize_unit(meta.get('unit'), dev_cls) or self._normalize_unit(unit, dev_cls) or DEFAULT_UNITS_BY_CLASS.get(dev_cls)
             if final_unit: payload["unit_of_measurement"] = final_unit
             if icon: payload["icon"] = icon
 
             # JSON Payload & Scaling & Mapping
-            payload["value_template"] = self.codec.value_template(comp, meta.get('scale', 0), meta.get('val_map'))
+            payload["value_template"] = self.codec.value_template(comp, meta.get('scale', 0), meta.get('val_map'), dp_id=d_id)
 
             if comp == "number":
                 scale = meta.get('scale', 0)

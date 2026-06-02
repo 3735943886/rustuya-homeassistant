@@ -1,0 +1,7 @@
+{
+  "mqtt_root_topic": "rustuya",
+  "mqtt_command_topic": "{root}/command/{action}/{id}/{dp}",
+  "mqtt_event_topic": "{root}/event/{id}/{dp}",
+  "mqtt_message_topic": "{root}/{level}/{id}",
+  "mqtt_payload_template": "{\"type\": \"{type}\", \"value\": {value}, \"name\": \"{name}\"}"
+}

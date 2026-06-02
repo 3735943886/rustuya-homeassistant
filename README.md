@@ -60,11 +60,27 @@ payloads, source = initialize_generator().generate(device)
 ### Topic/payload schemes (`TopicScheme` / `PayloadCodec`)
 
 Topics and the MQTT payload shape are injected via `scheme.py` rather than
-hardcoded. `DefaultTopicScheme` / `DefaultPayloadCodec` reproduce the current
-layout. The next track will derive these from a rustuya-bridge config
-(`mqtt_event_topic` / `mqtt_command_topic` / `mqtt_payload_template`) using the
-`pyrustuyabridge` template helpers, so discovery automatically follows whatever
-topic/payload templates the bridge is configured with.
+hardcoded, so **discovery follows whatever templates the bridge is configured
+with**. `DefaultTopicScheme` / `DefaultPayloadCodec` reproduce the historical
+layout; `BridgeTopicScheme` / `BridgePayloadCodec` (`core/bridge.py`) derive the
+layout from a rustuya-bridge config (`mqtt_event_topic` / `mqtt_command_topic` /
+`mqtt_message_topic` / `mqtt_payload_template`).
+
+The config is resolved per run: `--bridge-config <file>` > the retained
+`{root}/bridge/config` topic (read over the same MQTT connection, like
+rustuya-manager) > the legacy default. Derivation handles:
+
+- **per-DP** (`{dp}` in the event topic) and **multi-DP** (full `dps` dict on one
+  topic; `value_template` indexes by DP).
+- **value path**: `value_template` points at wherever `{value}`/`{dps}` sits in
+  the payload template (e.g. `{"value":{value}}` → `value_json.value`).
+- **active vs passive** (`{type}` in the event topic): `event` entities read the
+  `active` topic, stateful entities read the retained `passive` snapshot — per
+  the bridge's event model.
+
+The `LEGACY` profile in `core/bridge.py` is the bridge config that reproduces the
+historical output; `tests/test_bridge_scheme_legacy.py` asserts it stays
+byte-identical to the golden snapshots.
 
 ## Tests
 

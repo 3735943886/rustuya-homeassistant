@@ -8,6 +8,8 @@ from collections import defaultdict
 from typing import Dict, List, Set
 
 from ..core.generator import initialize_generator
+from ..core.bridge import BridgeConfig
+from ..core.scheme import scheme_for
 from . import render
 from .verifier import (
     DiscoveryVerifier,
@@ -30,14 +32,35 @@ class DiscoveryManager:
     broker host and file paths are no longer module-level constants."""
 
     def __init__(self, broker_host="localhost", broker_port=1883,
-                 devices_path="tuyadevices.json", converters_path=None):
+                 devices_path="tuyadevices.json", converters_path=None,
+                 bridge_config_path=None):
         self.broker_host = broker_host
         self.broker_port = broker_port
         self.devices_path = devices_path
+        self.bridge_config_path = bridge_config_path
         self.generator = initialize_generator(converters_path)
         self.verifier = DiscoveryVerifier(self.generator)
         self.devices: List[Dict] = []
         self.mqtt_data: Dict[str, Dict] = {}
+        self.bridge_config_payload = None  # retained {root}/bridge/config, if seen
+        self.config_source = "legacy"
+
+    def apply_bridge_config(self, allow_mqtt=True):
+        """Resolve the bridge config (file > retained MQTT > legacy) and inject the
+        derived scheme/codec into the generator. Returns the source label."""
+        cfg = None
+        if self.bridge_config_path:
+            cfg = BridgeConfig.from_json_file(self.bridge_config_path)
+            self.config_source = "file"
+        elif allow_mqtt and self.bridge_config_payload:
+            cfg = BridgeConfig.from_bridge_config_topic(self.bridge_config_payload)
+            self.config_source = "mqtt"
+        else:
+            self.config_source = "legacy"
+        if cfg is not None:
+            self.generator.scheme, self.generator.codec = scheme_for(cfg)
+        render.print_bridge_source(self.config_source)
+        return self.config_source
 
     # --- IO ---
 
@@ -51,13 +74,26 @@ class DiscoveryManager:
         client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
 
         def on_msg(c, u, m):
+            if m.topic.endswith("/bridge/config"):
+                # rustuya-bridge publishes its resolved config here (retained).
+                payload = m.payload.decode() if isinstance(m.payload, bytes) else m.payload
+                if payload:
+                    self.bridge_config_payload = payload
+                return
             if m.topic.endswith("/config"):
                 try:
                     self.mqtt_data[m.topic] = {"payload": json.loads(m.payload), "retain": m.retain}
                 except Exception:
                     pass
 
-        client.on_connect = lambda c, u, f, rc, p: c.subscribe(f"{HA_PREFIX}/#") if rc == 0 else None
+        def on_connect(c, u, f, rc, p):
+            if rc == 0:
+                c.subscribe(f"{HA_PREFIX}/#")
+                # {root}/bridge/config — root is unknown here, cover 1- and 2-level roots.
+                c.subscribe("+/bridge/config")
+                c.subscribe("+/+/bridge/config")
+
+        client.on_connect = on_connect
         client.on_message = on_msg
         try:
             client.connect(self.broker_host, self.broker_port)
@@ -97,6 +133,7 @@ class DiscoveryManager:
     def cmd_status(self, detail: bool = False, pattern: str = "*", categories=None):
         self.load_config()
         self.collect_mqtt()
+        self.apply_bridge_config()
         results = self.verifier.verify(self.devices, self.mqtt_data)
         results = filter_status_results(results, categories)
         render.print_summary(results)
@@ -110,6 +147,7 @@ class DiscoveryManager:
         if not matches:
             print(f"❌ No matching devices for {pattern!r}")
             return
+        self.apply_bridge_config(allow_mqtt=False)  # offline: file or legacy
         render.print_preview(matches, self.generator)
 
     def cmd_publish(self, pattern: str, yes: bool, dry_run: bool, categories=None):
@@ -121,6 +159,7 @@ class DiscoveryManager:
 
         # Collect existing retained topics up front (needed for category filter and stale calc)
         self.collect_mqtt()
+        self.apply_bridge_config()
 
         if categories:
             results = self.verifier.verify(self.devices, self.mqtt_data)
@@ -192,6 +231,7 @@ class DiscoveryManager:
             return
 
         self.collect_mqtt()
+        self.apply_bridge_config()
         results = (self.verifier.verify(self.devices, self.mqtt_data)
                    if (stale_only or categories) else None)
 

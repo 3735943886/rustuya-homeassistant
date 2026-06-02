@@ -12,8 +12,10 @@ from .core.generator import DiscoveryGenerator, initialize_generator
 from .core.converter import UserConverter
 from .core.scheme import (
     TopicScheme, PayloadCodec, DefaultTopicScheme, DefaultPayloadCodec,
+    BridgeTopicScheme, BridgePayloadCodec, scheme_for,
     DEFAULT_MANUFACTURER,
 )
+from .core.bridge import BridgeConfig, LEGACY as LEGACY_BRIDGE_CONFIG
 
 __all__ = [
     "DiscoveryGenerator",
@@ -23,5 +25,10 @@ __all__ = [
     "PayloadCodec",
     "DefaultTopicScheme",
     "DefaultPayloadCodec",
+    "BridgeTopicScheme",
+    "BridgePayloadCodec",
+    "scheme_for",
+    "BridgeConfig",
+    "LEGACY_BRIDGE_CONFIG",
     "DEFAULT_MANUFACTURER",
 ]

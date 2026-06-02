@@ -34,6 +34,17 @@ Examples:
 """
 
 
+_BRIDGE_SOURCE_NOTE = {
+    "file": "ℹ️ bridge config: --bridge-config file",
+    "mqtt": "ℹ️ bridge config: retained {root}/bridge/config",
+    "legacy": "ℹ️ bridge config: none found — using legacy default topic/payload layout",
+}
+
+
+def print_bridge_source(source: str):
+    print(_BRIDGE_SOURCE_NOTE.get(source, f"ℹ️ bridge config: {source}"))
+
+
 def print_preview(matches: List[Dict], generator):
     """Dump generator output for matching devices (read-only)."""
     for d in matches:

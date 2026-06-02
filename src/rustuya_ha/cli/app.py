@@ -28,6 +28,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="device list JSON (or $RUSTUYA_DEVICES; default tuyadevices.json)")
     common.add_argument("--converters", metavar="PATH",
                         help="custom converter JSON (or $RUSTUYA_CONVERTERS; default ./custom_converters.json)")
+    common.add_argument("--bridge-config", metavar="PATH",
+                        help="rustuya-bridge config JSON for topic/payload templates "
+                             "(or $RUSTUYA_BRIDGE_CONFIG; else read from retained MQTT, else legacy)")
 
     parser = argparse.ArgumentParser(
         prog=render.PROG,
@@ -82,9 +85,11 @@ def main(argv=None):
     host, port = parse_broker(getattr(args, "broker", None))
     devices = getattr(args, "devices", None) or os.environ.get("RUSTUYA_DEVICES") or "tuyadevices.json"
     converters = getattr(args, "converters", None)  # env/CWD/packaged fallback handled in UserConverter
+    bridge_config = getattr(args, "bridge_config", None) or os.environ.get("RUSTUYA_BRIDGE_CONFIG")
 
     mgr = DiscoveryManager(broker_host=host, broker_port=port,
-                           devices_path=devices, converters_path=converters)
+                           devices_path=devices, converters_path=converters,
+                           bridge_config_path=bridge_config)
 
     try:
         if args.cmd in (None, "status"):

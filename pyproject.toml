@@ -11,9 +11,6 @@ requires-python = ">=3.9"
 license = { text = "MIT" }
 dependencies = [
     "paho-mqtt>=2.0",
-    # Used from the #2 track onward to read rustuya-bridge config/templates and
-    # derive topic/payload schemes. Declared now per the agreed dependency model.
-    "pyrustuyabridge",
 ]
 
 [project.scripts]
