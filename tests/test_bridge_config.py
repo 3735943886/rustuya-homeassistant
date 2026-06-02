@@ -100,6 +100,24 @@ def test_skip_active_gating():
     assert "== 'active' else" not in vt({**no_type, "mqtt_retain": True})     # can't tell -> no skip
 
 
+def test_event_active_filter_gated_on_payload_type():
+    """The event template filters to `active` only when the payload carries
+    {type}. Without it (e.g. topic separates type), it must NOT reference a
+    missing value_json.type — else the event never fires."""
+    def ev(cfg):
+        return BridgePayloadCodec(BridgeConfig.from_dict(cfg)).value_template("event", dp_id="1")
+
+    sep_topic_no_payload_type = {"mqtt_event_topic": "{root}/event/{type}/{id}/{dp}",
+                                 "mqtt_payload_template": "{value}", "mqtt_retain": True}
+    # no active filter -> fires (note: "event_type" literal is always present)
+    assert "== 'active'" not in ev(sep_topic_no_payload_type)
+    assert "value_json.type" not in ev(sep_topic_no_payload_type)
+
+    with_payload_type = {"mqtt_event_topic": "{root}/event/{type}/{id}/{dp}",
+                         "mqtt_payload_template": '{"type":"{type}","value":{value}}'}
+    assert "== 'active' else ''" in ev(with_payload_type)  # keeps active filter
+
+
 def test_state_active_vs_passive_topic():
     # bridge README: event entities read active topic, stateful entities passive.
     s = BridgeTopicScheme(BridgeConfig.from_dict({"mqtt_event_topic": "{root}/event/{type}/{id}/{dp}"}))

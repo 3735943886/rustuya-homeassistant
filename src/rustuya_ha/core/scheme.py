@@ -42,18 +42,22 @@ def build_availability_template() -> str:
 def build_value_template(comp: str, scale: int = 0,
                          val_map: Optional[Dict[str, Any]] = None,
                          value_expr: str = LEGACY_VALUE_EXPR,
-                         type_expr: str = LEGACY_TYPE_EXPR,
+                         type_expr: Optional[str] = LEGACY_TYPE_EXPR,
                          skip_active: bool = False) -> str:
     """Jinja value_template reading the device's MQTT state payload.
 
-    ``event`` entities consume momentary `active` pushes (unchanged). For stateful
-    entities, ``skip_active`` makes the template ignore `active` messages (render
-    '' so HA drops the update) and read only the retained `passive` snapshot —
-    used when active+passive arrive on the same topic under retain mode."""
+    The active/passive distinction relies on the payload carrying ``{type}``
+    (``type_expr`` set). With it: ``event`` entities keep only `active`, and
+    stateful entities with ``skip_active`` drop `active` (render '' so HA skips
+    the update) to read only the retained `passive` snapshot. Without a payload
+    ``{type}`` (``type_expr`` is None), no such filter is emitted — the event
+    topic itself is expected to separate active/passive, or it can't be told."""
     guard = "value_json is defined and value_json != None and %s != None" % value_expr
     if comp == "event":
-        return ("{{ { \"event_type\": %s } | to_json if %s and %s | default('') == 'active' else '' }}"
-                % (value_expr, guard, type_expr))
+        cond = guard
+        if type_expr:
+            cond = "%s and %s | default('') == 'active'" % (guard, type_expr)
+        return "{{ { \"event_type\": %s } | to_json if %s else '' }}" % (value_expr, cond)
 
     if comp in ["binary_sensor", "switch"] and not val_map:
         inner = ("'true' if %s and %s == true else 'false' if %s and %s == false else 'unknown'"
@@ -72,7 +76,7 @@ def build_value_template(comp: str, scale: int = 0,
             final_expr = expr
         inner = "%s if %s else 'unknown'" % (final_expr, guard)
 
-    if skip_active:
+    if skip_active and type_expr:
         # `X if a else Y if b else Z` binds right, so prefixing is enough.
         inner = "'' if %s | default('') == 'active' else %s" % (type_expr, inner)
     return "{{ %s }}" % inner
@@ -177,8 +181,9 @@ class BridgePayloadCodec:
         vpath = config.value_path()
         self._value_path = vpath if vpath is not None else []  # [] = payload root
         tpath = config.type_path()
-        self._type_expr = (jinja_accessor("value_json", tpath)
-                           if tpath is not None else LEGACY_TYPE_EXPR)
+        # None when the payload carries no {type}: no active/passive filter is
+        # emitted (the topic is expected to separate them, or it can't be told).
+        self._type_expr = jinja_accessor("value_json", tpath) if tpath is not None else None
         self._skip_active = config.skip_active
 
     def availability_template(self) -> str:
