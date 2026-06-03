@@ -4,6 +4,7 @@ dist/
 *.egg-info/
 .pytest_cache/
 .venv/
+.rustuya-ha-backups/
 *.json
 !custom_converters.json
 !tests/fixtures/synthetic_devices.json

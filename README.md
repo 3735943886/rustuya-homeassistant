@@ -25,7 +25,28 @@ rustuya-ha preview 'guest_*'            # dump generator output, no MQTT
 rustuya-ha publish '*' --dry-run        # preview the publish/clear plan
 rustuya-ha publish '*' -y               # apply
 rustuya-ha clear '*' --stale-only       # drop orphan/stale topics
+rustuya-ha restore --last               # undo the last publish/clear
 ```
+
+### Undo (backup / restore)
+
+`publish` and `clear` already read the full retained discovery state before they
+write, so each one drops a timestamped backup of it first (under `--backup-dir`,
+default `.rustuya-ha-backups/`; `--no-backup` to skip). Since the discovery state
+lives entirely in retained `homeassistant/.../config` topics, that backup is a
+complete restore point.
+
+```bash
+rustuya-ha restore --last        # revert to the most recent backup
+rustuya-ha restore --list        # list available backups
+rustuya-ha restore <file>        # revert to a specific backup
+rustuya-ha restore --last --dry-run
+```
+
+Restore re-publishes the saved topics (retained) and clears any added since, so
+the live state matches the snapshot exactly. Restore also backs up the
+pre-restore state first, so an undo is itself undoable. Backups hold device
+names/ids (treat as private; the dir is gitignored).
 
 `PATTERN` is an fnmatch on device id or name (default `*`). `-c/--category`
 narrows by verifier category (see `rustuya-ha -h`).

@@ -11,6 +11,7 @@ from ..core.generator import initialize_generator
 from ..core.bridge import BridgeConfig
 from ..core.scheme import scheme_for
 from . import render
+from . import backup
 from .verifier import (
     DiscoveryVerifier,
     filter_matches_by_categories,
@@ -33,11 +34,14 @@ class DiscoveryManager:
 
     def __init__(self, broker_host="localhost", broker_port=1883,
                  devices_path="tuyadevices.json", converters_path=None,
-                 bridge_config_path=None):
+                 bridge_config_path=None, backup_dir=backup.DEFAULT_DIR,
+                 no_backup=False):
         self.broker_host = broker_host
         self.broker_port = broker_port
         self.devices_path = devices_path
         self.bridge_config_path = bridge_config_path
+        self.backup_dir = backup_dir
+        self.no_backup = no_backup
         self.generator = initialize_generator(converters_path)
         self.verifier = DiscoveryVerifier(self.generator)
         self.devices: List[Dict] = []
@@ -117,6 +121,15 @@ class DiscoveryManager:
             raise BrokerUnavailable(
                 f"cannot reach MQTT broker at {self.broker_host}:{self.broker_port} ({e})."
             ) from e
+
+    def _auto_backup(self):
+        """Snapshot the current retained discovery (already in self.mqtt_data from
+        collect_mqtt) before a mutating write, so publish/clear/restore are undoable."""
+        if self.no_backup:
+            return None
+        path = backup.save(self.backup_dir, self.mqtt_data, prefix="auto")
+        print(f"💾 backup: {path} ({len(self.mqtt_data)} topic(s)) — undo with: {render.PROG} restore --last")
+        return path
 
     def _match(self, pattern: str) -> List[Dict]:
         return [
@@ -220,6 +233,7 @@ class DiscoveryManager:
             print("aborted.")
             return
 
+        self._auto_backup()
         self._publish(msgs)
         print(f"✅ done.")
 
@@ -287,5 +301,46 @@ class DiscoveryManager:
             for topics in topics_by_dev.values()
             for t in set(topics)
         ]
+        self._auto_backup()
         self._publish(msgs)
         print(f"✅ cleared {total} topic(s).")
+
+    def cmd_restore(self, target=None, yes=False, dry_run=False, show_list=False):
+        """Revert retained discovery to a backup/snapshot (full-scope undo)."""
+        if show_list:
+            files = backup.listing(self.backup_dir)
+            if not files:
+                print(f"no backups in {self.backup_dir}")
+                return
+            print(f"backups in {self.backup_dir} (newest first):")
+            for p in files:
+                print(f"  {p.name}")
+            return
+
+        path = target or backup.latest(self.backup_dir)
+        if not path:
+            print(f"❌ no backup found in {self.backup_dir} (pass a file or run publish/clear first)")
+            return
+        snapshot = backup.load(path)
+
+        self.collect_mqtt()  # current retained discovery
+        current = set(self.mqtt_data)
+        set_msgs, clear_msgs = backup.restore_plan(snapshot, current)
+
+        print(f"\n📋 restore from {path}")
+        print(f"  set {len(set_msgs)} topic(s) to snapshot, clear {len(clear_msgs)} added since")
+        if dry_run:
+            for m in clear_msgs:
+                print(f"    - clear {m['topic']}")
+            print("\n🔎 dry-run: no MQTT writes.")
+            return
+        if not set_msgs and not clear_msgs:
+            print("ℹ️ already matches snapshot.")
+            return
+        if not yes and not self._confirm("\nProceed? [Y/n]: "):
+            print("aborted.")
+            return
+
+        self._auto_backup()  # back up pre-restore state too (undo the undo)
+        self._publish(clear_msgs + set_msgs)
+        print(f"✅ restored to {path}")
