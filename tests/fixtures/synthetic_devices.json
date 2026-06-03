@@ -8,27 +8,46 @@
     "local_strategy": {
       "1": {
         "status_code": "switch",
-        "config_item": {"valueType": "Boolean"}
+        "config_item": {
+          "valueType": "Boolean"
+        }
       },
       "2": {
         "status_code": "temp_set",
         "config_item": {
           "valueType": "Integer",
-          "valueDesc": {"min": 5, "max": 35, "step": 1, "scale": 0, "unit": "°C"}
+          "valueDesc": {
+            "min": 5,
+            "max": 35,
+            "step": 1,
+            "scale": 0,
+            "unit": "°C"
+          }
         }
       },
       "3": {
         "status_code": "temp_current",
         "config_item": {
           "valueType": "Integer",
-          "valueDesc": {"min": -20, "max": 60, "scale": 0, "unit": "°C"}
+          "valueDesc": {
+            "min": -20,
+            "max": 60,
+            "scale": 0,
+            "unit": "°C"
+          }
         }
       },
       "4": {
         "status_code": "mode",
         "config_item": {
           "valueType": "Enum",
-          "valueDesc": {"range": ["auto", "heat", "cool"]}
+          "valueDesc": {
+            "range": [
+              "auto",
+              "heat",
+              "cool"
+            ]
+          }
         }
       }
     },
@@ -49,14 +68,23 @@
         "status_code": "temp_set",
         "config_item": {
           "valueType": "Integer",
-          "valueDesc": {"min": 50, "max": 350, "step": 5, "scale": 1, "unit": "°C"}
+          "valueDesc": {
+            "min": 50,
+            "max": 350,
+            "step": 5,
+            "scale": 1,
+            "unit": "°C"
+          }
         }
       },
       "2": {
         "status_code": "temp_current",
         "config_item": {
           "valueType": "Integer",
-          "valueDesc": {"scale": 1, "unit": "°C"}
+          "valueDesc": {
+            "scale": 1,
+            "unit": "°C"
+          }
         }
       }
     },
@@ -73,18 +101,28 @@
     "local_strategy": {
       "1": {
         "status_code": "switch",
-        "config_item": {"valueType": "Boolean"}
+        "config_item": {
+          "valueType": "Boolean"
+        }
       },
       "2": {
         "status_code": "fan_speed",
         "config_item": {
           "valueType": "Enum",
-          "valueDesc": {"range": ["low", "mid", "high"]}
+          "valueDesc": {
+            "range": [
+              "low",
+              "mid",
+              "high"
+            ]
+          }
         }
       },
       "3": {
         "status_code": "fan_horizontal",
-        "config_item": {"valueType": "Boolean"}
+        "config_item": {
+          "valueType": "Boolean"
+        }
       }
     },
     "function": {
@@ -102,20 +140,30 @@
     "local_strategy": {
       "1": {
         "status_code": "switch_led",
-        "config_item": {"valueType": "Boolean"}
+        "config_item": {
+          "valueType": "Boolean"
+        }
       },
       "2": {
         "status_code": "bright_value",
         "config_item": {
           "valueType": "Integer",
-          "valueDesc": {"min": 10, "max": 1000, "scale": 0}
+          "valueDesc": {
+            "min": 10,
+            "max": 1000,
+            "scale": 0
+          }
         }
       },
       "3": {
         "status_code": "temp_value",
         "config_item": {
           "valueType": "Integer",
-          "valueDesc": {"min": 0, "max": 1000, "scale": 0}
+          "valueDesc": {
+            "min": 0,
+            "max": 1000,
+            "scale": 0
+          }
         }
       }
     },
@@ -136,13 +184,60 @@
     "local_strategy": {
       "101": {
         "status_code": "switch",
-        "config_item": {"valueType": "Boolean"}
+        "config_item": {
+          "valueType": "Boolean"
+        }
       },
       "103": {
         "status_code": "battery",
         "config_item": {
           "valueType": "Integer",
-          "valueDesc": {"min": 0, "max": 500, "scale": 0, "step": 1}
+          "valueDesc": {
+            "min": 0,
+            "max": 500,
+            "scale": 0,
+            "step": 1
+          }
+        }
+      }
+    }
+  },
+  {
+    "id": "synth_energy_01",
+    "name": "synth_energy_meter",
+    "category": "cz",
+    "product_id": "synth_cz_001",
+    "product_name": "Synthetic Energy Meter",
+    "function": {},
+    "local_strategy": {
+      "17": {
+        "status_code": "cur_power",
+        "config_item": {
+          "valueType": "Integer",
+          "valueDesc": {
+            "unit": "W",
+            "scale": 0
+          }
+        }
+      },
+      "18": {
+        "status_code": "add_ele",
+        "config_item": {
+          "valueType": "Integer",
+          "valueDesc": {
+            "unit": "kW·h",
+            "scale": 3
+          }
+        }
+      },
+      "19": {
+        "status_code": "energy",
+        "config_item": {
+          "valueType": "Integer",
+          "valueDesc": {
+            "unit": "kW·h",
+            "scale": 3
+          }
         }
       }
     }

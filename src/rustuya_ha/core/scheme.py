@@ -43,7 +43,8 @@ def build_value_template(comp: str, scale: int = 0,
                          val_map: Optional[Dict[str, Any]] = None,
                          value_expr: str = LEGACY_VALUE_EXPR,
                          type_expr: Optional[str] = LEGACY_TYPE_EXPR,
-                         skip_active: bool = False) -> str:
+                         skip_active: bool = False,
+                         active_only: bool = False) -> str:
     """Jinja value_template reading the device's MQTT state payload.
 
     The active/passive distinction relies on the payload carrying ``{type}``
@@ -76,7 +77,13 @@ def build_value_template(comp: str, scale: int = 0,
             final_expr = expr
         inner = "%s if %s else 'unknown'" % (final_expr, guard)
 
-    if skip_active and type_expr:
+    if active_only and type_expr:
+        # Incremental/delta DP (e.g. add_ele): keep only `active`, drop the stale
+        # retained `passive` snapshot. Parens needed — `inner` is itself a
+        # conditional. (When there's no {type} to tell them apart, fall through.)
+        inner = "(%s) if %s | default('') == 'active' else ''" % (inner, type_expr)
+    elif skip_active and type_expr:
+        # Absolute-state DP: drop `active` duplicate, read the `passive` snapshot.
         # `X if a else Y if b else Z` binds right, so prefixing is enough.
         inner = "'' if %s | default('') == 'active' else %s" % (type_expr, inner)
     return "{{ %s }}" % inner
@@ -151,7 +158,8 @@ class PayloadCodec(Protocol):
 
     def value_template(self, comp: str, scale: int = 0,
                        val_map: Optional[Dict[str, Any]] = None,
-                       dp_id: Optional[str] = None) -> str: ...
+                       dp_id: Optional[str] = None,
+                       active_only: bool = False) -> str: ...
     def availability_template(self) -> str: ...
 
 
@@ -164,8 +172,10 @@ class DefaultPayloadCodec:
 
     def value_template(self, comp: str, scale: int = 0,
                        val_map: Optional[Dict[str, Any]] = None,
-                       dp_id: Optional[str] = None) -> str:
-        return build_value_template(comp, scale, val_map, skip_active=True)
+                       dp_id: Optional[str] = None,
+                       active_only: bool = False) -> str:
+        return build_value_template(comp, scale, val_map,
+                                    skip_active=not active_only, active_only=active_only)
 
 
 class BridgePayloadCodec:
@@ -191,11 +201,13 @@ class BridgePayloadCodec:
 
     def value_template(self, comp: str, scale: int = 0,
                        val_map: Optional[Dict[str, Any]] = None,
-                       dp_id: Optional[str] = None) -> str:
+                       dp_id: Optional[str] = None,
+                       active_only: bool = False) -> str:
         index = None if self._per_dp else (str(dp_id) if dp_id is not None else None)
         value_expr = jinja_accessor("value_json", self._value_path, index=index)
-        return build_value_template(comp, scale, val_map, value_expr,
-                                    self._type_expr, skip_active=self._skip_active)
+        return build_value_template(comp, scale, val_map, value_expr, self._type_expr,
+                                    skip_active=(self._skip_active and not active_only),
+                                    active_only=active_only)
 
 
 def scheme_for(config: BridgeConfig):

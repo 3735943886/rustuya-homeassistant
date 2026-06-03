@@ -43,3 +43,17 @@ def test_value_template_event_and_switch_and_scale():
     assert "/ 10) | round(1)" in c.value_template("sensor", scale=1)
     # event template is unchanged — it still keeps active.
     assert c.value_template("event").endswith("== 'active' else '' }}")
+
+
+def test_active_only_sensor_keeps_active_drops_passive():
+    """Incremental/delta DPs (e.g. add_ele) must read `active` and drop the stale
+    retained `passive` snapshot — the inverse of the default passive-only."""
+    c = DefaultPayloadCodec()
+    passive = c.value_template("sensor")                 # normal: drop active
+    active = c.value_template("sensor", active_only=True)  # delta: drop passive
+    # active-only renders '' for non-active and the value for active
+    assert active.endswith("== 'active' else '' }}")
+    assert active.startswith("{{ (value_json.value if")
+    # and it is NOT the passive-only form
+    assert passive.startswith("{{ '' if value_json.type")
+    assert active != passive

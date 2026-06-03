@@ -14,7 +14,8 @@ File format (default path: custom_converters.json):
             "type": "Integer|Boolean|Enum|String",
             "ent_info": [comp, class, unit, icon],
             "scale": 1, "min": 0, "max": 100, "step": 1,
-            "options": [...], "val_map": {...}
+            "options": [...], "val_map": {...},
+            "active": true
           }
         }
       }
@@ -23,6 +24,10 @@ File format (default path: custom_converters.json):
 All fields under each dp_meta entry are optional. `code`, `type`, and
 `ent_info` are consumed directly by the generator; remaining keys are merged
 into the DP's metadata bag (scale/min/max/options/val_map/etc.).
+
+`"active": true` marks an incremental/delta DP (read the bridge's `active`
+stream, ignore the retained `passive` snapshot) — a per-product override for the
+global set in mapping.ACTIVE_ONLY_CODES (e.g. add_ele).
 """
 import json
 import logging

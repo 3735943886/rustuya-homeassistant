@@ -105,6 +105,26 @@ DP_CODE_MAP = {
     "far_detection": ("number", None, "m", "mdi:magnify-minus"),
 }
 
+# --- Active/passive value semantics ---
+# rustuya-bridge publishes two flavors of each event (see bridge README §Events):
+#   active  = the delta that just changed (no-retain; the "moment of change")
+#   passive = full retained snapshot (the current state, recoverable on reconnect)
+#
+# Almost every DP is an ABSOLUTE STATE (temperature, switch, mode...) → read the
+# retained `passive` snapshot. But a few Tuya DPs are CUMULATIVE-INCREMENT / delta
+# values that only make sense on the active push — reading them from the retained
+# passive snapshot re-delivers a stale increment (double-count / phantom on
+# reconnect). Those few are listed here and treated like `event` entities:
+# subscribe the `active` stream, ignore passive.
+#
+# This is a Tuya smell (a "sensor" that is really an event). Keep the set MINIMAL
+# and explicit. NOTE: cumulative TOTALS (e.g. "energy" = total kWh) are absolute
+# state and must NOT be here — only the per-report increments belong.
+# Per-device exceptions can also be set via custom_converters dp_meta "active": true.
+ACTIVE_ONLY_CODES = {
+    "add_ele",  # incremental energy added since last report (NOT a running total)
+}
+
 # --- Tuya Category Reference ---
 # Official Tuya category codes -> description (per developer.tuya.com).
 # This dict is reference-only. Actual HA domain routing is done by CATEGORY_MAP below.

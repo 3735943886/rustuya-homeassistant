@@ -5,6 +5,7 @@ from typing import Dict, Any, Optional, Set, Tuple
 from .mapping import (
     UNIT_NORM_MAP, DEFAULT_UNITS_BY_CLASS,
     DP_CODE_MAP, GENERIC_MAP, PROPERTY_MAP, CATEGORY_MAP, COMPLEX_SIGNATURES,
+    ACTIVE_ONLY_CODES,
 )
 from .converter import UserConverter
 from .scheme import (
@@ -222,15 +223,19 @@ class DiscoveryGenerator:
                 else: ent_info = ("sensor", None, None, None)
 
             comp, dev_cls, unit, icon = ent_info
-            # HA `event` entities consume momentary device-initiated pushes -> active topic.
-            payload = {"name": str(code).replace("_", " ").capitalize(), "unique_id": f"{dev_id}_{code}", "state_topic": self.scheme.state(dev_id, d_id, active=(comp == "event")), "device": common_device, **avail}
+            # `event` entities and incremental/delta DPs (e.g. add_ele) read the
+            # `active` stream; absolute-state DPs read the retained `passive` one.
+            # See mapping.ACTIVE_ONLY_CODES; per-device override via dp_meta "active".
+            delta = (code in ACTIVE_ONLY_CODES) or bool(meta.get("active"))
+            is_active = (comp == "event") or delta
+            payload = {"name": str(code).replace("_", " ").capitalize(), "unique_id": f"{dev_id}_{code}", "state_topic": self.scheme.state(dev_id, d_id, active=is_active), "device": common_device, **avail}
             if dev_cls: payload["device_class"] = dev_cls
             final_unit = self._normalize_unit(meta.get('unit'), dev_cls) or self._normalize_unit(unit, dev_cls) or DEFAULT_UNITS_BY_CLASS.get(dev_cls)
             if final_unit: payload["unit_of_measurement"] = final_unit
             if icon: payload["icon"] = icon
 
             # JSON Payload & Scaling & Mapping
-            payload["value_template"] = self.codec.value_template(comp, meta.get('scale', 0), meta.get('val_map'), dp_id=d_id)
+            payload["value_template"] = self.codec.value_template(comp, meta.get('scale', 0), meta.get('val_map'), dp_id=d_id, active_only=delta)
 
             if comp == "number":
                 scale = meta.get('scale', 0)
