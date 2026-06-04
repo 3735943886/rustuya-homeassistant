@@ -60,7 +60,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_status.add_argument("-c", "--category", **cat_kwargs)
 
     p_prev = sub.add_parser("preview", parents=[common],
-                            help="Dump expected generator output for matching devices (no MQTT)")
+                            help="Dump expected generator output for matching devices "
+                                 "(mirrors live bridge config if a broker is reachable)")
     p_prev.add_argument("pattern", nargs="?", default="*", help="fnmatch on id/name (default: all)")
 
     p_pub = sub.add_parser("publish", parents=[common],

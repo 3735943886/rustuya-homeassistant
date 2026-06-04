@@ -113,6 +113,41 @@ class DiscoveryManager:
         client.loop_stop()
         client.disconnect()
 
+    def fetch_bridge_config(self):
+        """Best-effort grab of the retained ``{root}/bridge/config`` from the broker.
+
+        Lets an otherwise-offline ``preview`` mirror the live topic/payload layout
+        (the documented file > retained-MQTT > legacy order). Silently no-ops if
+        paho isn't installed or the broker is unreachable, so preview stays usable
+        on a box without an MQTT stack."""
+        try:
+            import paho.mqtt.client as mqtt
+        except ImportError:
+            return
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+
+        def on_msg(c, u, m):
+            payload = m.payload.decode() if isinstance(m.payload, bytes) else m.payload
+            if payload:
+                self.bridge_config_payload = payload
+
+        def on_connect(c, u, f, rc, p):
+            if rc == 0:
+                # root is unknown here, cover 1- and 2-level roots.
+                c.subscribe("+/bridge/config")
+                c.subscribe("+/+/bridge/config")
+
+        client.on_connect = on_connect
+        client.on_message = on_msg
+        try:
+            client.connect(self.broker_host, self.broker_port)
+        except (ConnectionRefusedError, OSError):
+            return
+        client.loop_start()
+        time.sleep(COLLECT_WAIT)
+        client.loop_stop()
+        client.disconnect()
+
     def _publish(self, msgs):
         import paho.mqtt.publish as publish
         try:
@@ -154,13 +189,19 @@ class DiscoveryManager:
             render.print_mismatch_details(results, pattern)
 
     def cmd_preview(self, pattern: str):
-        """Show generator output for matching devices without touching MQTT."""
+        """Show generator output for matching devices.
+
+        Mirrors the live topic/payload layout: explicit --bridge-config wins, else
+        a best-effort read of the retained bridge config from the broker, else the
+        legacy default (preview still works with no broker / no MQTT stack)."""
         self.load_config()
         matches = self._match(pattern)
         if not matches:
             print(f"❌ No matching devices for {pattern!r}")
             return
-        self.apply_bridge_config(allow_mqtt=False)  # offline: file or legacy
+        if not self.bridge_config_path:
+            self.fetch_bridge_config()  # best-effort; no-op offline
+        self.apply_bridge_config(allow_mqtt=True)  # file > retained MQTT > legacy
         render.print_preview(matches, self.generator)
 
     def cmd_publish(self, pattern: str, yes: bool, dry_run: bool, categories=None):
