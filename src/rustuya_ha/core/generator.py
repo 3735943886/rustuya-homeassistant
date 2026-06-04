@@ -85,7 +85,7 @@ class DiscoveryGenerator:
     _OVERRIDE_RESERVED = (
         {r[0] for r in _READ_ROLES} | {r[1] for r in _READ_ROLES}
         | {c[0] for c in _CMD_ROLES}
-        | {"invert_position", "invert_set_position", "component"}
+        | {"invert_position", "invert_set_position", "remove", "component"}
     )
 
     @staticmethod
@@ -113,6 +113,9 @@ class DiscoveryGenerator:
           can report and accept position on different conventions. Read-role knobs
           work without `<role>_dp`: the builder's own DP is reused. Command roles
           (command, set_position) take only `<role>_dp`.
+        - removal — `<role>_dp: null` drops that whole role (its topic, and for a
+          read role its template), e.g. a state-less optimistic cover that reports
+          only position. `"remove": [field, ...]` drops arbitrary payload keys.
         - verbatim — every other key (payload_open, state_*, device_class, icon,
           a literal *_template, ...) is device- and payload-independent and is
           copied as-is.
@@ -125,6 +128,12 @@ class DiscoveryGenerator:
             invert_pos = bool(block.get("invert_position"))
 
             for dp_key, stream_key, topic_field, tmpl_field, invertable in self._READ_ROLES:
+                if dp_key in block and block[dp_key] is None:
+                    # explicit null -> drop the whole read role (topic + template),
+                    # e.g. an optimistic, state-less cover reporting only position.
+                    payload.pop(topic_field, None)
+                    payload.pop(tmpl_field, None)
+                    continue
                 has_dp, stream = dp_key in block, block.get(stream_key)
                 invert = invertable and invert_pos
                 if not (has_dp or stream is not None or invert):
@@ -146,7 +155,11 @@ class DiscoveryGenerator:
                     transform="100 - ((%s) | int)" if invert else None)
 
             for dp_key, topic_field in self._CMD_ROLES:
-                if dp_key in block:
+                if dp_key not in block:
+                    continue
+                if block[dp_key] is None:  # explicit null -> drop the command topic
+                    payload.pop(topic_field, None)
+                else:
                     payload[topic_field] = self.scheme.command(dev_id, str(block[dp_key]))
             if block.get("invert_set_position"):
                 # Command direction (HA position -> device): no codec seam exists
@@ -156,6 +169,10 @@ class DiscoveryGenerator:
             for key, val in block.items():
                 if key not in self._OVERRIDE_RESERVED:
                     payload[key] = val
+
+            # Drop arbitrary keys last, so removal always wins over the merges above.
+            for field in block.get("remove", ()):
+                payload.pop(field, None)
 
     # --- DP normalization & merging ---
 

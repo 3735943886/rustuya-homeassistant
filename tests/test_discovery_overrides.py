@@ -180,6 +180,32 @@ def test_state_stream_without_state_dp_reuses_builder_dp(tmp_path):
     assert cover["value_template"].rstrip().endswith("== 'active' else '' }}")
 
 
+def test_state_dp_null_drops_state_role(tmp_path):
+    """`state_dp: null` removes the cover's state_topic + value_template, leaving an
+    optimistic, position-only cover."""
+    gen = _generator({PRODUCT_ID: {"discovery_overrides": {"cover": {
+        "state_dp": None,
+        "invert_position": True,
+    }}}}, tmp_path)
+    cover = gen.generate(CURTAIN_DEVICE)[0][COVER_TOPIC]
+    assert "state_topic" not in cover
+    assert "value_template" not in cover
+    # other roles untouched
+    assert "command_topic" in cover
+    assert "position_topic" in cover
+    assert "100 - ((value_json.value) | int)" in cover["position_template"]
+
+
+def test_remove_list_drops_arbitrary_fields(tmp_path):
+    gen = _generator({PRODUCT_ID: {"discovery_overrides": {"cover": {
+        "remove": ["device_class", "payload_stop"],
+    }}}}, tmp_path)
+    cover = gen.generate(CURTAIN_DEVICE)[0][COVER_TOPIC]
+    assert "device_class" not in cover
+    assert "payload_stop" not in cover
+    assert "command_topic" in cover  # untouched
+
+
 def test_override_only_touches_named_component(tmp_path):
     """An override for an absent component must not leak onto other entities."""
     gen = _generator({

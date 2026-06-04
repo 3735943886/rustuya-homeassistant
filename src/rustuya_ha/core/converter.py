@@ -47,6 +47,9 @@ component on the device. Keys are either structured or verbatim:
 - `invert_position: true` inverts the read direction (position_template emits
   `100 - value`); `invert_set_position: true` independently inverts the write
   direction (a `set_position_template` of `100 - value`).
+- `<role>_dp: null` drops that whole role — its topic, and for a read role its
+  template (e.g. a state-less, optimistic cover that reports only position).
+  `"remove": ["field", ...]` drops arbitrary payload keys.
 - every other key (payload_*, state_*, device_class, icon, a literal *_template,
   ...) is device- and payload-independent and merges verbatim.
 

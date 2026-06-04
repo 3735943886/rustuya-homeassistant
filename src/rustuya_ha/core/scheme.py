@@ -54,7 +54,12 @@ def build_value_template(comp: str, scale: int = 0,
     the update) to read only the retained `passive` snapshot. Without a payload
     ``{type}`` (``type_expr`` is None), no such filter is emitted — the event
     topic itself is expected to separate active/passive, or it can't be told."""
-    guard = "value_json is defined and value_json != None and %s != None" % value_expr
+    # When value_expr is the payload root itself (bare `{value}` payloads), the
+    # "<expr> != None" clause duplicates "value_json != None" — drop the tail.
+    if value_expr == "value_json":
+        guard = "value_json is defined and value_json != None"
+    else:
+        guard = "value_json is defined and value_json != None and %s != None" % value_expr
     if comp == "event":
         cond = guard
         if type_expr:

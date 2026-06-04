@@ -32,6 +32,7 @@
     "model": "智能窗帘电机",
     "discovery_overrides": {
       "cover": {
+        "state_dp": null,
         "invert_position": true,
         "invert_set_position": true,
         "payload_open": "close",
