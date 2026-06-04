@@ -52,7 +52,110 @@ class DiscoveryGenerator:
         parent_id = device.get('parent')
         entities = self._build_entities(device_id, name, category, normalized_dps, info, device.get('function', {}), parent_id=parent_id)
 
+        # 4. Apply user-defined discovery payload overrides (component-level)
+        if user_info:
+            overrides = user_info.get('discovery_overrides')
+            if overrides:
+                self._apply_overrides(device_id, entities, overrides)
+
         return entities, source_label
+
+    # --- Discovery payload overrides ---
+
+    # Topic-role override keys: "<role>_dp" picks a DP and resolves it through the
+    # active scheme, so the emitted topic stays correct per-device (a literal
+    # topic string would otherwise hardcode one device's id).
+    #
+    # Read roles also get their value_template rebuilt through the codec (adapts
+    # to the bridge payload shape, not hardcoded `value_json.value`) and a
+    # "<role>_stream" key choosing the active/passive stream. Touching ANY of a
+    # read role's knobs (dp / stream / — for position — invert) rebuilds that
+    # role even if its dp isn't overridden, reusing the builder's dp.
+    #   (dp_key, stream_key, topic_field, template_field, invertable)
+    _READ_ROLES = [
+        ("state_dp", "state_stream", "state_topic", "value_template", False),
+        ("position_dp", "position_stream", "position_topic", "position_template", True),
+    ]
+    # Command roles are write-only: a DP -> topic, no template, no stream.
+    _CMD_ROLES = [
+        ("command_dp", "command_topic"),
+        ("set_position_dp", "set_position_topic"),
+    ]
+    # Reserved keys consumed by the override logic — never merged verbatim.
+    _OVERRIDE_RESERVED = (
+        {r[0] for r in _READ_ROLES} | {r[1] for r in _READ_ROLES}
+        | {c[0] for c in _CMD_ROLES}
+        | {"invert_position", "invert_set_position", "component"}
+    )
+
+    @staticmethod
+    def _topic_dp(topic: str) -> str:
+        """The DP a builder-emitted topic addresses — every scheme puts {dp} last."""
+        return topic.rsplit("/", 1)[-1]
+
+    def _apply_overrides(self, dev_id: str, entities: Dict[str, Any], overrides: Dict[str, Any]):
+        """Merge user ``discovery_overrides`` into generated component payloads.
+
+        Keyed by component type ("cover", "climate", ...); applies to every entity
+        of that component on the device (single-entity components like cover/
+        climate/fan/light are the intended target; for per-DP tweaks on sensors/
+        switches use ``dp_meta`` instead).
+
+        Two kinds of keys:
+        - structured — read roles (state, position) take `<role>_dp` (DP, resolved
+          to a topic via the scheme) and `<role>_stream` ("active"|"passive",
+          default "passive": passive reads the retained snapshot, active keeps only
+          the delta). Either rebuilds the role's value_template through the codec
+          (payload-shape adaptation kept, not hardcoded). `invert_position: true`
+          inverts the read direction (position_template emits `100 - value`);
+          `invert_set_position: true` independently inverts the write direction
+          (`set_position_template` of `100 - value`) — separate because a device
+          can report and accept position on different conventions. Read-role knobs
+          work without `<role>_dp`: the builder's own DP is reused. Command roles
+          (command, set_position) take only `<role>_dp`.
+        - verbatim — every other key (payload_open, state_*, device_class, icon,
+          a literal *_template, ...) is device- and payload-independent and is
+          copied as-is.
+        """
+        for topic, payload in entities.items():
+            comp = topic.split("/")[-3]
+            block = overrides.get(comp)
+            if not block:
+                continue
+            invert_pos = bool(block.get("invert_position"))
+
+            for dp_key, stream_key, topic_field, tmpl_field, invertable in self._READ_ROLES:
+                has_dp, stream = dp_key in block, block.get(stream_key)
+                invert = invertable and invert_pos
+                if not (has_dp or stream is not None or invert):
+                    continue  # role untouched
+                # Resolve the DP: explicit override, else reuse the builder's.
+                if has_dp:
+                    dp = str(block[dp_key])
+                elif payload.get(topic_field):
+                    dp = self._topic_dp(payload[topic_field])
+                else:
+                    continue  # role not present on this entity
+                active = stream == "active"
+                # Re-emit the topic only when the dp or the stream's active flag
+                # was actually chosen (a pure invert leaves the builder's topic).
+                if has_dp or stream is not None:
+                    payload[topic_field] = self.scheme.state(dev_id, dp, active=active)
+                payload[tmpl_field] = self.codec.value_template(
+                    comp, dp_id=dp, active_only=active,
+                    transform="100 - ((%s) | int)" if invert else None)
+
+            for dp_key, topic_field in self._CMD_ROLES:
+                if dp_key in block:
+                    payload[topic_field] = self.scheme.command(dev_id, str(block[dp_key]))
+            if block.get("invert_set_position"):
+                # Command direction (HA position -> device): no codec seam exists
+                # for command encoding, so the legacy raw-int form is used.
+                payload["set_position_template"] = "{{ 100 - value | int }}"
+
+            for key, val in block.items():
+                if key not in self._OVERRIDE_RESERVED:
+                    payload[key] = val
 
     # --- DP normalization & merging ---
 

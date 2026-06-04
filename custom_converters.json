@@ -11,5 +11,33 @@
         "step": 1
       }
     }
+  },
+  "f6jujmx0is5td50x": {
+    "model": "curtain motor",
+    "discovery_overrides": {
+      "cover": {
+        "position_dp": "2",
+        "invert_position": true,
+        "invert_set_position": true,
+        "state_opening": "open",
+        "state_closing": "close",
+        "state_stopped": "stop",
+        "payload_open": "open",
+        "payload_close": "close",
+        "payload_stop": "stop"
+      }
+    }
+  },
+  "h2wipnagcunsar5r": {
+    "model": "智能窗帘电机",
+    "discovery_overrides": {
+      "cover": {
+        "invert_position": true,
+        "invert_set_position": true,
+        "payload_open": "close",
+        "payload_close": "open",
+        "payload_stop": "stop"
+      }
+    }
   }
 }

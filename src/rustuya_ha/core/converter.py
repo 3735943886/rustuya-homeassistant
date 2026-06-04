@@ -17,6 +17,13 @@ File format (default path: custom_converters.json):
             "options": [...], "val_map": {...},
             "active": true
           }
+        },
+        "discovery_overrides": {
+          "<component>": {
+            "position_dp": "2",
+            "invert_position": true, "invert_set_position": true,
+            "payload_open": "open", "payload_close": "close", "payload_stop": "stop"
+          }
         }
       }
     }
@@ -24,6 +31,26 @@ File format (default path: custom_converters.json):
 All fields under each dp_meta entry are optional. `code`, `type`, and
 `ent_info` are consumed directly by the generator; remaining keys are merged
 into the DP's metadata bag (scale/min/max/options/val_map/etc.).
+
+`discovery_overrides` patches the *generated discovery payload* for whole
+components that dp_meta can't reach (e.g. a cover's position inversion, command
+payload map). It is keyed by component type and applies to every entity of that
+component on the device. Keys are either structured or verbatim:
+
+- `<role>_dp` (command_dp/state_dp/position_dp/set_position_dp) names a DP,
+  resolved to a topic through the active scheme (stays correct per-device). Read
+  roles (state/position) also get their value_template rebuilt through the codec
+  — so it adapts to the bridge payload shape rather than hardcoding
+  `value_json.value`.
+- `<role>_stream` (state_stream/position_stream): "active" | "passive" (default
+  "passive"). Passive reads the retained snapshot; active keeps only the delta.
+- `invert_position: true` inverts the read direction (position_template emits
+  `100 - value`); `invert_set_position: true` independently inverts the write
+  direction (a `set_position_template` of `100 - value`).
+- every other key (payload_*, state_*, device_class, icon, a literal *_template,
+  ...) is device- and payload-independent and merges verbatim.
+
+See generator.DiscoveryGenerator._apply_overrides.
 
 `"active": true` marks an incremental/delta DP (read the bridge's `active`
 stream, ignore the retained `passive` snapshot) — a per-product override for the
