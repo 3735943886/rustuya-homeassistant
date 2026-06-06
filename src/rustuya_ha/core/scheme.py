@@ -72,7 +72,7 @@ def build_value_template(comp: str, scale: int = 0,
     else:
         base = value_expr
         if scale > 0:
-            expr = "((%s | float) / %g) | round(1)" % (base, 10 ** scale)
+            expr = "((%s | float) / %g) | round(%d)" % (base, 10 ** scale, scale)
         else:
             expr = base
         if val_map:
