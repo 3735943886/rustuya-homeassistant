@@ -357,6 +357,13 @@ class DiscoveryGenerator:
             # JSON Payload & Scaling & Mapping
             payload["value_template"] = self.codec.value_template(comp, meta.get('scale', 0), meta.get('val_map'), dp_id=d_id, active_only=delta)
 
+            # Delta/incremental DP (e.g. add_ele): the same increment value recurs,
+            # and HA suppresses state-changed events for unchanged values — so a
+            # utility_meter / integration would miss repeats. force_update makes
+            # every report fire. (Only delta sensors need it; absolute state doesn't.)
+            if delta:
+                payload["force_update"] = True
+
             if comp == "number":
                 scale = meta.get('scale', 0)
                 for k in ['min', 'max', 'step']:

@@ -126,6 +126,7 @@
           "name": "synth_energy_meter"
         },
         "device_class": "energy",
+        "force_update": true,
         "name": "Add ele",
         "payload_available": "online",
         "payload_not_available": "offline",
