@@ -48,12 +48,14 @@ def build_value_template(comp: str, scale: int = 0,
                          transform: Optional[str] = None) -> str:
     """Jinja value_template reading the device's MQTT state payload.
 
-    The active/passive distinction relies on the payload carrying ``{type}``
+    The type distinction relies on the payload carrying ``{type}``
     (``type_expr`` set). With it: ``event`` entities keep only `active`, and
-    stateful entities with ``skip_active`` drop `active` (render '' so HA skips
-    the update) to read only the retained `passive` snapshot. Without a payload
-    ``{type}`` (``type_expr`` is None), no such filter is emitted — the event
-    topic itself is expected to separate active/passive, or it can't be told."""
+    stateful entities with ``skip_active`` keep only `state` (render '' for
+    everything else so HA skips the update) to read the retained full-state
+    snapshot, ignoring the ephemeral no-retain `active`/`passive` deltas.
+    Without a payload ``{type}`` (``type_expr`` is None), no such filter is
+    emitted — the event topic itself is expected to separate the types, or it
+    can't be told."""
     # When value_expr is the payload root itself (bare `{value}` payloads), the
     # "<expr> != None" clause duplicates "value_json != None" — drop the tail.
     if value_expr == "value_json":
@@ -88,15 +90,17 @@ def build_value_template(comp: str, scale: int = 0,
             final_expr = transform % final_expr
         inner = "%s if %s else 'unknown'" % (final_expr, guard)
 
-    if active_only and type_expr:
-        # Incremental/delta DP (e.g. add_ele): keep only `active`, drop the stale
-        # retained `passive` snapshot. Parens needed — `inner` is itself a
-        # conditional. (When there's no {type} to tell them apart, fall through.)
-        inner = "(%s) if %s | default('') == 'active' else ''" % (inner, type_expr)
-    elif skip_active and type_expr:
-        # Absolute-state DP: drop `active` duplicate, read the `passive` snapshot.
-        # `X if a else Y if b else Z` binds right, so prefixing is enough.
-        inner = "'' if %s | default('') == 'active' else %s" % (type_expr, inner)
+    # In cache mode the bridge emits no-retain `active`/`passive` deltas plus a
+    # retained `state` snapshot. Pick which {type} this entity reads. Parens
+    # needed — `inner` is itself a conditional. (No {type} to tell them apart =>
+    # no filter, fall through.)
+    keep = "active" if active_only else "state" if skip_active else None
+    #   active_only: incremental/delta DP (e.g. add_ele) reads the `active` delta,
+    #     never the snapshot, which would re-add the same increment (double-count).
+    #   skip_active: absolute-state DP reads the retained `state` snapshot, never
+    #     the ephemeral (possibly partial) deltas.
+    if keep and type_expr:
+        inner = "(%s) if %s | default('') == '%s' else ''" % (inner, type_expr, keep)
     return "{{ %s }}" % inner
 
 
@@ -143,13 +147,20 @@ class BridgeTopicScheme:
         return HA_DISCOVERY_TOPIC.format(component, dev_id, code)
 
     def state(self, dev_id: str, dp_id: str, active: bool = False) -> str:
-        # rustuya-bridge README §Events: `active` = no-retain delta (event
-        # semantics, fires once), `passive` = retained full snapshot (current
-        # state, recoverable on reconnect). HA `event` entities need `active`;
-        # all stateful entities read `passive`. (No-op when {type} not in topic.)
+        # rustuya-bridge README §Events: `active`/`passive` = no-retain raw
+        # deltas (event semantics, fire once); `state` = retained full snapshot
+        # (current state, recoverable on reconnect), emitted only in cache mode
+        # (mqtt_retain). HA `event` entities need the `active` delta; stateful
+        # entities read the retained `state` snapshot in cache mode, falling back
+        # to the `passive` delta in pass-through mode where no snapshot exists.
+        # (No-op when {type} not in topic.)
+        if active:
+            mtype = "active"
+        else:
+            mtype = "state" if self.config.retain else "passive"
         return render_topic(self.config.event_topic,
                             root=self.config.root, id=dev_id, dp=str(dp_id),
-                            type="active" if active else "passive")
+                            type=mtype)
 
     def command(self, dev_id: str, dp_id: str) -> str:
         return render_topic(self.config.command_topic,
@@ -177,7 +188,7 @@ class PayloadCodec(Protocol):
 
 class DefaultPayloadCodec:
     """Templates for the historical payload shape. Legacy ran with retain=true and
-    a {type}-carrying payload, so stateful entities read passive only."""
+    a {type}-carrying payload, so stateful entities read the `state` snapshot only."""
 
     def availability_template(self) -> str:
         return build_availability_template()

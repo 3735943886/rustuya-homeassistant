@@ -86,7 +86,7 @@ def test_bridge_topic_scheme_multi_dp_same_device_topic():
 
 
 def test_skip_active_gating():
-    """Stateful entities go passive-only ONLY when retain=true AND payload carries
+    """Stateful entities go state-only ONLY when retain=true AND payload carries
     {type}; otherwise they must accept whatever arrives (any config supported)."""
     def vt(cfg):
         return BridgePayloadCodec(BridgeConfig.from_dict(cfg)).value_template("sensor", dp_id="2")
@@ -95,9 +95,9 @@ def test_skip_active_gating():
     with_type = {**base, "mqtt_payload_template": '{"type":"{type}","value":{value}}'}
     no_type = {**base, "mqtt_payload_template": '{"value":{value}}'}
 
-    assert "== 'active' else" in vt({**with_type, "mqtt_retain": True})    # skip
-    assert "== 'active' else" not in vt({**with_type, "mqtt_retain": False})  # no passive -> no skip
-    assert "== 'active' else" not in vt({**no_type, "mqtt_retain": True})     # can't tell -> no skip
+    assert "== 'state' else" in vt({**with_type, "mqtt_retain": True})    # snapshot-only
+    assert "== 'state' else" not in vt({**with_type, "mqtt_retain": False})  # no snapshot -> no filter
+    assert "== 'state' else" not in vt({**no_type, "mqtt_retain": True})     # can't tell -> no filter
 
 
 def test_event_active_filter_gated_on_payload_type():
@@ -118,10 +118,16 @@ def test_event_active_filter_gated_on_payload_type():
     assert "== 'active' else ''" in ev(with_payload_type)  # keeps active filter
 
 
-def test_state_active_vs_passive_topic():
-    # bridge README: event entities read active topic, stateful entities passive.
-    s = BridgeTopicScheme(BridgeConfig.from_dict({"mqtt_event_topic": "{root}/event/{type}/{id}/{dp}"}))
-    assert s.state("dev", "5") == "rustuya/event/passive/dev/5"
-    assert s.state("dev", "5", active=True) == "rustuya/event/active/dev/5"
+def test_state_active_vs_state_topic():
+    # bridge README: event entities read the `active` delta topic; stateful
+    # entities read the retained `state` snapshot in cache mode, else the
+    # `passive` delta (pass-through has no snapshot).
+    topic = {"mqtt_event_topic": "{root}/event/{type}/{id}/{dp}"}
+    cache = BridgeTopicScheme(BridgeConfig.from_dict({**topic, "mqtt_retain": True}))
+    assert cache.state("dev", "5") == "rustuya/event/state/dev/5"
+    assert cache.state("dev", "5", active=True) == "rustuya/event/active/dev/5"
+    # pass-through (retain=false): no snapshot -> stateful falls back to passive
+    passthru = BridgeTopicScheme(BridgeConfig.from_dict(topic))
+    assert passthru.state("dev", "5") == "rustuya/event/passive/dev/5"
     # legacy (no {type}) is unaffected by the flag
     assert BridgeTopicScheme(LEGACY).state("dev", "5", active=True) == "rustuya/event/dev/5"

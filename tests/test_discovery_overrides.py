@@ -106,7 +106,7 @@ def test_cover_override_merges_and_resolves_dp(tmp_path):
     assert cover["set_position_topic"] == "rustuya/command/set/dev_curtain_demo/2"
     # read-side position template went through the codec: inverted AND payload-shape
     # aware (carries value_json.value via the codec, NOT a hardcoded literal), and
-    # keeps the active/passive filter the codec emits for stateful entities.
+    # keeps the `state` snapshot filter the codec emits for stateful entities.
     assert "100 - ((value_json.value) | int)" in cover["position_template"]
     assert cover["position_template"].startswith("{{")
     # structured keys must not leak into the payload verbatim
@@ -131,9 +131,9 @@ def test_invert_position_and_set_position_are_independent(tmp_path):
     assert "100 -" not in cover["position_template"]
 
 
-def test_position_stream_selects_active_vs_passive(tmp_path):
-    """`position_stream` flips the read filter between passive (drop active deltas)
-    and active (keep only deltas); default is passive."""
+def test_position_stream_selects_active_vs_state(tmp_path):
+    """`position_stream` flips the read filter between passive (read the retained
+    `state` snapshot) and active (keep only the delta); default is passive."""
     def pos_template(stream):
         block = {"position_dp": "2"}
         if stream:
@@ -147,8 +147,8 @@ def test_position_stream_selects_active_vs_passive(tmp_path):
     active = pos_template("active")
 
     assert passive_default == passive  # default is passive
-    # passive: render '' when the message is an active delta, else the value
-    assert passive.startswith("{{ '' if value_json.type | default('') == 'active' else")
+    # passive: keep only the retained `state` snapshot, render '' otherwise
+    assert passive.rstrip().endswith("== 'state' else '' }}")
     # active: keep only the active delta, render '' otherwise
     assert active.rstrip().endswith("== 'active' else '' }}")
     assert passive != active

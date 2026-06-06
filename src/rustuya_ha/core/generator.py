@@ -104,8 +104,8 @@ class DiscoveryGenerator:
         Two kinds of keys:
         - structured — read roles (state, position) take `<role>_dp` (DP, resolved
           to a topic via the scheme) and `<role>_stream` ("active"|"passive",
-          default "passive": passive reads the retained snapshot, active keeps only
-          the delta). Either rebuilds the role's value_template through the codec
+          default "passive": passive reads the retained `state` snapshot, active
+          keeps only the delta). Either rebuilds the role's value_template through the codec
           (payload-shape adaptation kept, not hardcoded). `invert_position: true`
           inverts the read direction (position_template emits `100 - value`);
           `invert_set_position: true` independently inverts the write direction
@@ -344,7 +344,7 @@ class DiscoveryGenerator:
 
             comp, dev_cls, unit, icon = ent_info
             # `event` entities and incremental/delta DPs (e.g. add_ele) read the
-            # `active` stream; absolute-state DPs read the retained `passive` one.
+            # `active` stream; absolute-state DPs read the retained `state` snapshot.
             # See mapping.ACTIVE_ONLY_CODES; per-device override via dp_meta "active".
             delta = (code in ACTIVE_ONLY_CODES) or bool(meta.get("active"))
             is_active = (comp == "event") or delta

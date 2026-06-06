@@ -33,27 +33,29 @@ def test_availability_template_offline_branch():
 def test_value_template_event_and_switch_and_scale():
     c = DefaultPayloadCodec()
     assert "event_type" in c.value_template("event")
-    # stateful entities ignore `active` (passive-only) and read value on passive.
+    # stateful entities keep only `state` (the retained snapshot) and drop the
+    # no-retain active/passive deltas.
     assert c.value_template("switch") == (
-        "{{ '' if value_json.type | default('') == 'active' else "
-        "'true' if value_json is defined and value_json != None and value_json.value != None "
+        "{{ ('true' if value_json is defined and value_json != None and value_json.value != None "
         "and value_json.value == true else 'false' if value_json is defined and value_json != None "
-        "and value_json.value != None and value_json.value == false else 'unknown' }}"
+        "and value_json.value != None and value_json.value == false else 'unknown') "
+        "if value_json.type | default('') == 'state' else '' }}"
     )
     assert "/ 10) | round(1)" in c.value_template("sensor", scale=1)
     # event template is unchanged — it still keeps active.
     assert c.value_template("event").endswith("== 'active' else '' }}")
 
 
-def test_active_only_sensor_keeps_active_drops_passive():
-    """Incremental/delta DPs (e.g. add_ele) must read `active` and drop the stale
-    retained `passive` snapshot — the inverse of the default passive-only."""
+def test_active_only_sensor_keeps_active_drops_snapshot():
+    """Incremental/delta DPs (e.g. add_ele) must read `active` and drop the
+    retained `state` snapshot — the inverse of the default state-only."""
     c = DefaultPayloadCodec()
-    passive = c.value_template("sensor")                 # normal: drop active
-    active = c.value_template("sensor", active_only=True)  # delta: drop passive
+    state = c.value_template("sensor")                     # normal: read the snapshot
+    active = c.value_template("sensor", active_only=True)  # delta: read the active push
     # active-only renders '' for non-active and the value for active
     assert active.endswith("== 'active' else '' }}")
     assert active.startswith("{{ (value_json.value if")
-    # and it is NOT the passive-only form
-    assert passive.startswith("{{ '' if value_json.type")
-    assert active != passive
+    # the state-only form keeps only `state`
+    assert state.endswith("== 'state' else '' }}")
+    assert state.startswith("{{ (value_json.value if")
+    assert active != state

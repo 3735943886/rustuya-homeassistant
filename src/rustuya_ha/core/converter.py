@@ -43,7 +43,8 @@ component on the device. Keys are either structured or verbatim:
   — so it adapts to the bridge payload shape rather than hardcoding
   `value_json.value`.
 - `<role>_stream` (state_stream/position_stream): "active" | "passive" (default
-  "passive"). Passive reads the retained snapshot; active keeps only the delta.
+  "passive"). Passive reads the retained `state` snapshot; active keeps only the
+  delta.
 - `invert_position: true` inverts the read direction (position_template emits
   `100 - value`); `invert_set_position: true` independently inverts the write
   direction (a `set_position_template` of `100 - value`).
@@ -56,7 +57,7 @@ component on the device. Keys are either structured or verbatim:
 See generator.DiscoveryGenerator._apply_overrides.
 
 `"active": true` marks an incremental/delta DP (read the bridge's `active`
-stream, ignore the retained `passive` snapshot) — a per-product override for the
+stream, ignore the retained `state` snapshot) — a per-product override for the
 global set in mapping.ACTIVE_ONLY_CODES (e.g. add_ele).
 """
 import json

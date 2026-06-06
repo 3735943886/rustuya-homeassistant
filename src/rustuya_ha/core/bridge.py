@@ -119,7 +119,7 @@ class BridgeConfig:
     event_topic: str = DEFAULTS["event_topic"]
     message_topic: str = DEFAULTS["message_topic"]
     payload_template: str = DEFAULTS["payload_template"]
-    retain: bool = False  # mqtt_retain: true => active delta + retained passive snapshot
+    retain: bool = False  # mqtt_retain: true => no-retain active/passive deltas + retained `state` snapshot
 
     @classmethod
     def from_dict(cls, cfg: Dict[str, Any]) -> "BridgeConfig":
@@ -165,11 +165,12 @@ class BridgeConfig:
 
     @property
     def skip_active(self) -> bool:
-        """Whether stateful value_templates should ignore `active` messages and
-        read only the retained `passive` snapshot. Safe only when retain is on
-        (passive is guaranteed to follow) AND the payload carries `{type}` (so we
-        can tell active from passive). Works regardless of whether the event
-        topic also separates {type} — there it's simply redundant."""
+        """Whether stateful value_templates should ignore the no-retain
+        `active`/`passive` deltas and read only the retained `state` snapshot.
+        Safe only when retain is on (the `state` snapshot is guaranteed to
+        follow) AND the payload carries `{type}` (so we can tell the snapshot
+        from the deltas). Works regardless of whether the event topic also
+        separates {type} — there it's simply redundant."""
         return self.retain and self.type_path() is not None
 
 

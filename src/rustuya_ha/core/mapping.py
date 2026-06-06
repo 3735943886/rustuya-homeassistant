@@ -105,17 +105,19 @@ DP_CODE_MAP = {
     "far_detection": ("number", None, "m", "mdi:magnify-minus"),
 }
 
-# --- Active/passive value semantics ---
-# rustuya-bridge publishes two flavors of each event (see bridge README §Events):
-#   active  = the delta that just changed (no-retain; the "moment of change")
-#   passive = full retained snapshot (the current state, recoverable on reconnect)
+# --- Active/state value semantics ---
+# rustuya-bridge publishes each update as several flavors (see bridge README §Events):
+#   active/passive = the raw delta that just arrived (no-retain; the "moment of
+#                    change"); active = device-initiated, passive = readback/report
+#   state          = full retained snapshot (current state, recoverable on reconnect),
+#                    cache mode only (mqtt_retain)
 #
 # Almost every DP is an ABSOLUTE STATE (temperature, switch, mode...) → read the
-# retained `passive` snapshot. But a few Tuya DPs are CUMULATIVE-INCREMENT / delta
+# retained `state` snapshot. But a few Tuya DPs are CUMULATIVE-INCREMENT / delta
 # values that only make sense on the active push — reading them from the retained
-# passive snapshot re-delivers a stale increment (double-count / phantom on
+# state snapshot re-delivers a stale increment (double-count / phantom on
 # reconnect). Those few are listed here and treated like `event` entities:
-# subscribe the `active` stream, ignore passive.
+# subscribe the `active` stream, ignore the snapshot.
 #
 # This is a Tuya smell (a "sensor" that is really an event). Keep the set MINIMAL
 # and explicit. NOTE: cumulative TOTALS (e.g. "energy" = total kWh) are absolute
