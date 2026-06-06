@@ -385,6 +385,20 @@ class DiscoveryGenerator:
             if comp not in ['sensor', 'binary_sensor', 'event']: payload["command_topic"] = self.scheme.command(dev_id, d_id)
             results[self.scheme.discovery(comp, dev_id, code)] = payload
 
+            # Delta DP `passive` companion: some devices report the increment on
+            # the `passive` stream (readback) rather than `active`. Emit a second
+            # sensor reading `passive` so those devices still get a value. Same
+            # no-retain delta semantics (no reconnect replay), distinct
+            # unique_id/entity_id via the `_passive` suffix. (Not for events.)
+            if delta and comp != "event":
+                companion = dict(payload)
+                companion["unique_id"] = f"{dev_id}_{code}_passive"
+                companion["name"] = f"{payload['name']} passive"
+                companion["state_topic"] = self.scheme.state(dev_id, d_id, passive=True)
+                companion["value_template"] = self.codec.value_template(
+                    comp, meta.get('scale', 0), meta.get('val_map'), dp_id=d_id, passive_only=True)
+                results[self.scheme.discovery(comp, dev_id, f"{code}_passive")] = companion
+
 
 def initialize_generator(custom_path: Optional[str] = None) -> DiscoveryGenerator:
     return DiscoveryGenerator(UserConverter(custom_path))

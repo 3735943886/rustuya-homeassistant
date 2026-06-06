@@ -135,6 +135,27 @@
         "unit_of_measurement": "kWh",
         "value_template": "{{ (((value_json.value | float) / 1000) | round(3) if value_json is defined and value_json != None and value_json.value != None else 'unknown') if value_json.type | default('') == 'active' else '' }}"
       },
+      "homeassistant/sensor/synth_energy_01_add_ele_passive/config": {
+        "availability_template": "{{ 'offline' if value_json is defined and value_json != None and value_json.errorCode in [901, 905, 914] else 'online' }}",
+        "availability_topic": "rustuya/error/synth_energy_01",
+        "device": {
+          "identifiers": [
+            "synth_energy_01"
+          ],
+          "manufacturer": "rustuya",
+          "model": "Synthetic Energy Meter",
+          "name": "synth_energy_meter"
+        },
+        "device_class": "energy",
+        "force_update": true,
+        "name": "Add ele passive",
+        "payload_available": "online",
+        "payload_not_available": "offline",
+        "state_topic": "rustuya/event/synth_energy_01/18",
+        "unique_id": "synth_energy_01_add_ele_passive",
+        "unit_of_measurement": "kWh",
+        "value_template": "{{ (((value_json.value | float) / 1000) | round(3) if value_json is defined and value_json != None and value_json.value != None else 'unknown') if value_json.type | default('') == 'passive' else '' }}"
+      },
       "homeassistant/sensor/synth_energy_01_cur_power/config": {
         "availability_template": "{{ 'offline' if value_json is defined and value_json != None and value_json.errorCode in [901, 905, 914] else 'online' }}",
         "availability_topic": "rustuya/error/synth_energy_01",

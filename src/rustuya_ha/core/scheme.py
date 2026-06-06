@@ -45,6 +45,7 @@ def build_value_template(comp: str, scale: int = 0,
                          type_expr: Optional[str] = LEGACY_TYPE_EXPR,
                          skip_active: bool = False,
                          active_only: bool = False,
+                         passive_only: bool = False,
                          transform: Optional[str] = None) -> str:
     """Jinja value_template reading the device's MQTT state payload.
 
@@ -94,9 +95,13 @@ def build_value_template(comp: str, scale: int = 0,
     # retained `state` snapshot. Pick which {type} this entity reads. Parens
     # needed — `inner` is itself a conditional. (No {type} to tell them apart =>
     # no filter, fall through.)
-    keep = "active" if active_only else "state" if skip_active else None
+    keep = ("active" if active_only else "passive" if passive_only
+            else "state" if skip_active else None)
     #   active_only: incremental/delta DP (e.g. add_ele) reads the `active` delta,
     #     never the snapshot, which would re-add the same increment (double-count).
+    #   passive_only: the `passive` companion of such a delta DP — same no-retain
+    #     delta semantics, but for devices that report add_ele via `passive`
+    #     (readback) instead of `active`. Also no replay on reconnect (no-retain).
     #   skip_active: absolute-state DP reads the retained `state` snapshot, never
     #     the ephemeral (possibly partial) deltas.
     if keep and type_expr:
@@ -111,7 +116,8 @@ class TopicScheme(Protocol):
     """Maps (device, dp, component) tuples to MQTT topic strings."""
 
     def discovery(self, component: str, dev_id: str, code: str) -> str: ...
-    def state(self, dev_id: str, dp_id: str, active: bool = False) -> str: ...
+    def state(self, dev_id: str, dp_id: str, active: bool = False,
+              passive: bool = False) -> str: ...
     def command(self, dev_id: str, dp_id: str) -> str: ...
     def availability(self, dev_id: str) -> str: ...
 
@@ -127,7 +133,8 @@ class DefaultTopicScheme:
     def discovery(self, component: str, dev_id: str, code: str) -> str:
         return self.DISCOVERY.format(component, dev_id, code)
 
-    def state(self, dev_id: str, dp_id: str, active: bool = False) -> str:
+    def state(self, dev_id: str, dp_id: str, active: bool = False,
+              passive: bool = False) -> str:
         return self.STATE.format(dev_id, dp_id)  # legacy topic has no {type}
 
     def command(self, dev_id: str, dp_id: str) -> str:
@@ -146,16 +153,20 @@ class BridgeTopicScheme:
     def discovery(self, component: str, dev_id: str, code: str) -> str:
         return HA_DISCOVERY_TOPIC.format(component, dev_id, code)
 
-    def state(self, dev_id: str, dp_id: str, active: bool = False) -> str:
+    def state(self, dev_id: str, dp_id: str, active: bool = False,
+              passive: bool = False) -> str:
         # rustuya-bridge README §Events: `active`/`passive` = no-retain raw
         # deltas (event semantics, fire once); `state` = retained full snapshot
         # (current state, recoverable on reconnect), emitted only in cache mode
         # (mqtt_retain). HA `event` entities need the `active` delta; stateful
         # entities read the retained `state` snapshot in cache mode, falling back
         # to the `passive` delta in pass-through mode where no snapshot exists.
-        # (No-op when {type} not in topic.)
+        # `passive` is the explicit raw-passive delta (e.g. the add_ele passive
+        # companion). (No-op when {type} not in topic.)
         if active:
             mtype = "active"
+        elif passive:
+            mtype = "passive"
         else:
             mtype = "state" if self.config.retain else "passive"
         return render_topic(self.config.event_topic,
@@ -182,6 +193,7 @@ class PayloadCodec(Protocol):
                        val_map: Optional[Dict[str, Any]] = None,
                        dp_id: Optional[str] = None,
                        active_only: bool = False,
+                       passive_only: bool = False,
                        transform: Optional[str] = None) -> str: ...
     def availability_template(self) -> str: ...
 
@@ -197,9 +209,11 @@ class DefaultPayloadCodec:
                        val_map: Optional[Dict[str, Any]] = None,
                        dp_id: Optional[str] = None,
                        active_only: bool = False,
+                       passive_only: bool = False,
                        transform: Optional[str] = None) -> str:
         return build_value_template(comp, scale, val_map,
-                                    skip_active=not active_only, active_only=active_only,
+                                    skip_active=not (active_only or passive_only),
+                                    active_only=active_only, passive_only=passive_only,
                                     transform=transform)
 
 
@@ -228,12 +242,14 @@ class BridgePayloadCodec:
                        val_map: Optional[Dict[str, Any]] = None,
                        dp_id: Optional[str] = None,
                        active_only: bool = False,
+                       passive_only: bool = False,
                        transform: Optional[str] = None) -> str:
         index = None if self._per_dp else (str(dp_id) if dp_id is not None else None)
         value_expr = jinja_accessor("value_json", self._value_path, index=index)
         return build_value_template(comp, scale, val_map, value_expr, self._type_expr,
-                                    skip_active=(self._skip_active and not active_only),
-                                    active_only=active_only, transform=transform)
+                                    skip_active=(self._skip_active and not (active_only or passive_only)),
+                                    active_only=active_only, passive_only=passive_only,
+                                    transform=transform)
 
 
 def scheme_for(config: BridgeConfig):

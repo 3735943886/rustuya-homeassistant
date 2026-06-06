@@ -59,3 +59,15 @@ def test_active_only_sensor_keeps_active_drops_snapshot():
     assert state.endswith("== 'state' else '' }}")
     assert state.startswith("{{ (value_json.value if")
     assert active != state
+
+
+def test_passive_only_keeps_passive_delta():
+    """The add_ele passive companion reads the raw `passive` delta — same shape
+    as active_only but filtered on `passive`."""
+    c = DefaultPayloadCodec()
+    passive = c.value_template("sensor", active_only=False, passive_only=True)
+    assert passive.endswith("== 'passive' else '' }}")
+    assert passive.startswith("{{ (value_json.value if")
+    # distinct from both the active delta and the state snapshot
+    assert passive != c.value_template("sensor", active_only=True)
+    assert passive != c.value_template("sensor")
