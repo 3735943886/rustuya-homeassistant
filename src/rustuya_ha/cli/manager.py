@@ -12,7 +12,7 @@ from ..core.bridge import BridgeConfig
 from ..core.scheme import scheme_for
 from . import render
 from . import backup
-from .verifier import (
+from ..core.verifier import (
     DiscoveryVerifier,
     filter_matches_by_categories,
     filter_status_results,

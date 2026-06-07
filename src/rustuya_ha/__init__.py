@@ -16,6 +16,13 @@ from .core.scheme import (
     DEFAULT_MANUFACTURER,
 )
 from .core.bridge import BridgeConfig, LEGACY as LEGACY_BRIDGE_CONFIG
+from .core.verifier import (
+    DiscoveryVerifier,
+    filter_matches_by_categories,
+    filter_status_results,
+    CATEGORY_ALIASES,
+)
+from .core.restore import restore_plan
 
 __all__ = [
     "DiscoveryGenerator",
@@ -31,4 +38,9 @@ __all__ = [
     "BridgeConfig",
     "LEGACY_BRIDGE_CONFIG",
     "DEFAULT_MANUFACTURER",
+    "DiscoveryVerifier",
+    "filter_matches_by_categories",
+    "filter_status_results",
+    "CATEGORY_ALIASES",
+    "restore_plan",
 ]

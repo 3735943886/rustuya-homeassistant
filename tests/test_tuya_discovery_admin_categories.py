@@ -7,7 +7,7 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from rustuya_ha.cli.verifier import (  # noqa: E402
+from rustuya_ha.core.verifier import (  # noqa: E402
     CATEGORY_ALIASES,
     filter_matches_by_categories,
     filter_status_results,

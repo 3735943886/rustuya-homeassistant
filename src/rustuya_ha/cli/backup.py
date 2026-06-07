@@ -11,7 +11,11 @@ so the backup dir should be gitignored.
 import json
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
+
+# Pure plan builder lives in core; re-exported here so the CLI keeps a single
+# `backup.*` surface (backup.restore_plan) over both persistence and planning.
+from ..core.restore import restore_plan  # noqa: F401  (re-export)
 
 DEFAULT_DIR = ".rustuya-ha-backups"
 KEEP = 20  # rotate: keep the newest N auto-backups
@@ -63,17 +67,3 @@ def listing(backup_dir: str) -> List[Path]:
 def latest(backup_dir: str) -> Optional[str]:
     files = listing(backup_dir)
     return str(files[0]) if files else None
-
-
-def restore_plan(snapshot_topics: Dict[str, dict],
-                 current_topics) -> Tuple[List[dict], List[dict]]:
-    """Pure: messages to fully revert retained discovery to ``snapshot_topics``.
-
-    - set: re-publish every saved topic (retained) — overwrites modified ones too.
-    - clear: empty-publish topics present now but absent from the snapshot (the
-      additions). Together these make the live state match the snapshot exactly."""
-    set_msgs = [{"topic": t, "payload": json.dumps(p), "retain": True}
-                for t, p in snapshot_topics.items()]
-    clear = sorted(set(current_topics) - set(snapshot_topics))
-    clear_msgs = [{"topic": t, "payload": "", "retain": True} for t in clear]
-    return set_msgs, clear_msgs

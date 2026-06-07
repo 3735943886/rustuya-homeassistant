@@ -6,7 +6,7 @@ import logging
 import argparse
 
 from .manager import DiscoveryManager, BrokerUnavailable
-from .verifier import CATEGORY_ALIASES
+from ..core.verifier import CATEGORY_ALIASES
 from . import render
 from . import backup
 
