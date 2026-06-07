@@ -70,7 +70,7 @@ def build_value_template(comp: str, scale: int = 0,
         return "{{ { \"event_type\": %s } | to_json if %s else '' }}" % (value_expr, cond)
 
     if comp in ["binary_sensor", "switch"] and not val_map:
-        inner = ("'true' if %s and %s == true else 'false' if %s and %s == false else 'unknown'"
+        inner = ("'true' if %s and %s == true else 'false' if %s and %s == false else none"
                  % (guard, value_expr, guard, value_expr))
     else:
         base = value_expr
@@ -89,7 +89,7 @@ def build_value_template(comp: str, scale: int = 0,
         # codec derived, so the payload-shape adaptation is preserved.
         if transform:
             final_expr = transform % final_expr
-        inner = "%s if %s else 'unknown'" % (final_expr, guard)
+        inner = "%s if %s else none" % (final_expr, guard)
 
     # In cache mode the bridge emits no-retain `active`/`passive` deltas plus a
     # retained `state` snapshot. Pick which {type} this entity reads. Parens
