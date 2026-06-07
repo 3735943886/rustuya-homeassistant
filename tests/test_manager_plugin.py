@@ -15,6 +15,7 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
+from rustuya_ha.core import backup  # noqa: E402
 from rustuya_ha.core.generator import initialize_generator  # noqa: E402
 from rustuya_ha.manager_plugin import DiscoveryPlugin, register  # noqa: E402
 
@@ -30,10 +31,23 @@ class FakeNamespace:
         self.data = data
 
 
+class FakeBridgeClient:
+    """Captures publish_raw calls; optionally simulates a disconnected broker."""
+
+    def __init__(self, connected=True):
+        self.connected = connected
+        self.published = []  # list of (topic, payload, retain)
+
+    async def publish_raw(self, topic, payload, *, retain=False, qos=1):
+        if not self.connected:
+            raise RuntimeError("MQTT broker not connected")
+        self.published.append((topic, payload, retain))
+
+
 class FakeCtx:
     """Minimal stand-in for the manager's PluginContext."""
 
-    def __init__(self, devices=None, bridge_cfg=None, api_version=1):
+    def __init__(self, devices=None, bridge_cfg=None, api_version=1, connected=True):
         self.api_version = api_version
         self._devices = {d["id"]: d for d in (devices or [])}
         self._bridge_cfg = bridge_cfg
@@ -41,6 +55,7 @@ class FakeCtx:
         self.routers = []
         self.pages = []
         self.ns = FakeNamespace()
+        self.bridge_client = FakeBridgeClient(connected=connected)
 
     def devices(self):
         return dict(self._devices)
@@ -188,6 +203,112 @@ def test_status_includes_detail():
     out = p.status()
     assert "detail" in out and "perfect" in out["detail"]
     json.dumps(out)
+
+
+# ── write actions: publish / clear / restore (M3) ────────────────────────
+def _seed_retained(plugin, devices, bridge_cfg):
+    for topic, entry in _retained_for(devices, bridge_cfg).items():
+        plugin.retained[topic] = entry
+
+
+def test_publish_dry_run_does_not_write(tmp_path):
+    async def go():
+        ctx = FakeCtx(devices=DEVICES, bridge_cfg=LEGACY_CFG)
+        p = DiscoveryPlugin(ctx)
+        p.backup_dir = str(tmp_path)
+        res = await p.publish([d["id"] for d in DEVICES], dry_run=True)
+        assert res["executed"] is False and res["msg_count"] > 0
+        assert ctx.bridge_client.published == []
+        assert list(tmp_path.iterdir()) == []  # no backup written on dry-run
+
+    asyncio.run(go())
+
+
+def test_publish_writes_and_backs_up(tmp_path):
+    async def go():
+        ctx = FakeCtx(devices=DEVICES, bridge_cfg=LEGACY_CFG)
+        p = DiscoveryPlugin(ctx)
+        p.backup_dir = str(tmp_path)
+        res = await p.publish([d["id"] for d in DEVICES])
+        assert res["executed"] is True
+        # Every device's expected topics were published (retained, non-empty).
+        assert len(ctx.bridge_client.published) == res["msg_count"] > 0
+        assert all(retain and payload != "" for _, payload, retain in ctx.bridge_client.published)
+        # A backup snapshot was written before the write.
+        assert Path(res["backup"]).is_file()
+
+    asyncio.run(go())
+
+
+def test_clear_writes_empty_retained(tmp_path):
+    async def go():
+        ctx = FakeCtx(devices=DEVICES, bridge_cfg=LEGACY_CFG)
+        p = DiscoveryPlugin(ctx)
+        p.backup_dir = str(tmp_path)
+        _seed_retained(p, DEVICES, LEGACY_CFG)
+        n_topics = len(p.retained)
+        res = await p.clear([d["id"] for d in DEVICES])
+        assert res["executed"] is True
+        assert len(ctx.bridge_client.published) == n_topics
+        assert all(payload == "" and retain for _, payload, retain in ctx.bridge_client.published)
+
+    asyncio.run(go())
+
+
+def test_restore_reverts_to_snapshot(tmp_path):
+    async def go():
+        ctx = FakeCtx(devices=DEVICES, bridge_cfg=LEGACY_CFG)
+        p = DiscoveryPlugin(ctx)
+        p.backup_dir = str(tmp_path)
+        # Snapshot a known-good retained state to a backup file.
+        _seed_retained(p, DEVICES, LEGACY_CFG)
+        snap_path = backup.save(str(tmp_path), p.retained, prefix="manual")
+        snapshot_topics = set(p.retained)
+        # Now simulate drift: drop one topic, add an extra one.
+        dropped = next(iter(snapshot_topics))
+        del p.retained[dropped]
+        p.retained["homeassistant/sensor/extra/config"] = {"payload": {}, "retain": True}
+        res = await p.restore(snap_path)
+        assert res["executed"] is True
+        published = {t: pl for t, pl, _ in ctx.bridge_client.published}
+        # The dropped topic is re-set; the added topic is cleared (empty payload).
+        assert dropped in published and published[dropped] != ""
+        assert published.get("homeassistant/sensor/extra/config") == ""
+
+    asyncio.run(go())
+
+
+def test_restore_no_backup_returns_error(tmp_path):
+    async def go():
+        ctx = FakeCtx(devices=DEVICES, bridge_cfg=LEGACY_CFG)
+        p = DiscoveryPlugin(ctx)
+        p.backup_dir = str(tmp_path)  # empty dir → no backups
+        res = await p.restore()
+        assert res["executed"] is False and "error" in res
+        assert ctx.bridge_client.published == []
+
+    asyncio.run(go())
+
+
+def test_publish_raises_when_broker_down(tmp_path):
+    async def go():
+        ctx = FakeCtx(devices=DEVICES, bridge_cfg=LEGACY_CFG, connected=False)
+        p = DiscoveryPlugin(ctx)
+        p.backup_dir = str(tmp_path)
+        with pytest.raises(RuntimeError, match="not connected"):
+            await p.publish([d["id"] for d in DEVICES])
+
+    asyncio.run(go())
+
+
+def test_list_backups(tmp_path):
+    ctx = FakeCtx(devices=DEVICES, bridge_cfg=LEGACY_CFG)
+    p = DiscoveryPlugin(ctx)
+    p.backup_dir = str(tmp_path)
+    assert p.list_backups() == []
+    backup.save(str(tmp_path), {"homeassistant/x/config": {"payload": {"a": 1}}}, prefix="auto")
+    names = [b["name"] for b in p.list_backups()]
+    assert len(names) == 1 and names[0].startswith("auto-")
 
 
 # ── register() wiring (needs fastapi) ────────────────────────────────────

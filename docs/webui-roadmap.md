@@ -46,11 +46,12 @@ largely done; the remaining work is the plumbing into the manager + the UI.
 Each milestone is an independently shippable slice. **Decision gate after M2** —
 validate the whole pipeline before investing in write-actions and polish.
 
-> **Status — 2026-06-08.** M0 ✅, M1 ✅, M1.5 ✅, **M-host+ ✅, and M2 ✅** are
-> done and verified — **the decision gate is passed**: with both packages
-> installed the manager grows a live, read-only "HA Discovery" tab driven entirely
-> through the host-agnostic plugin contract. The contract proved sufficient, so
-> **M3 (write actions) is unblocked** and is the next critical-path step. Remaining
+> **Status — 2026-06-08.** M0 ✅, M1 ✅, M1.5 ✅, M-host+ ✅, M2 ✅, **and M3 ✅**
+> are done and verified. The decision gate passed and write actions landed: with
+> both packages installed the manager's "HA Discovery" tab now does a live status
+> grid **plus** per-device/bulk publish · clear · restore (dry-run preview +
+> confirm, auto-backup undo), all through the host-agnostic plugin contract. Next
+> critical-path step is **M4** (drill-in field diffs + grid polish). Remaining
 > manager-side work is only the optional **M-host++** frontend e2e hardening.
 > Milestone numbers/anchors below are pinned to verified current code.
 
@@ -134,11 +135,24 @@ HA-agnostic plugin host:
 - **Done:** behaviour unchanged for a plugin-less manager (zero-plugin no-regression
   intact); +6 unit tests (manager suite 219 pass); HA-agnostic.
 
-### M3 — Write actions: publish / clear / restore  *(rustuya-ha, ~1.5–2d)*
-- `/api/discovery/{publish,clear,restore}`; publish via the M-host+ primitive
-  (aiomqtt); reuse the pure `restore_plan`; auto-backup before writes.
-- **Frontend:** per-device and bulk actions, dry-run/confirm UX (`ctx.confirm`),
-  restore + undo.
+### M3 — Write actions: publish / clear / restore  *(rustuya-ha)*  ✅ DONE & VERIFIED
+- `POST /api/discovery/{publish,clear,restore}` + `GET /api/discovery/backups`.
+  Publish via the M-host+ `publish_raw` primitive; a broker-down write surfaces
+  as HTTP 503. Auto-backup (snapshot of retained state) precedes every write —
+  same format/rotation as the CLI, in `.rustuya-ha-backups/` (gitignored).
+- **Shared engine:** pure plan builders extracted to `core/plan.py`
+  (`publish_plan` / `clear_plan` / `owned_topics`) — single source of truth now
+  used by *both* the CLI (`cli/manager.py` delegates to them) and the plugin.
+  Backup persistence promoted to `core/backup.py` (CLI `cli/backup.py` re-exports)
+  so the plugin depends only on `rustuya_ha.core`. Restore reuses pure `restore_plan`.
+- **Frontend:** per-device Publish/Clear buttons + bulk "Publish needing sync" /
+  "Clear all" / "Restore last"; each previews its plan via a dry-run, confirms
+  (`ctx.confirm`, danger style for destructive ops), then executes. The grid
+  refreshes itself from the namespace push (broker echo) — no manual reload.
+- **Verified:** unit tests for plan builders + every write path (dry-run no-op,
+  backup-before-write, clear-empty-retained, restore revert, broker-down raise);
+  E2E through the manager's `build_app` (dry-run plan, 503 on broker-down,
+  backups listing). rustuya-ha **209 pass**.
 - **Done:** discovery can be reconciled entirely from the UI; undo works.
 
 ### M4 — Drill-in diffs + parity polish  *(~1–1.5d)*

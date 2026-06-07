@@ -23,6 +23,7 @@ from .core.verifier import (
     CATEGORY_ALIASES,
 )
 from .core.restore import restore_plan
+from .core.plan import publish_plan, clear_plan, owned_topics
 
 __all__ = [
     "DiscoveryGenerator",
@@ -43,4 +44,7 @@ __all__ = [
     "filter_status_results",
     "CATEGORY_ALIASES",
     "restore_plan",
+    "publish_plan",
+    "clear_plan",
+    "owned_topics",
 ]

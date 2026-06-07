@@ -27,8 +27,10 @@ import logging
 import os
 from typing import Any, Dict, List, Optional
 
+from ..core import backup, plan
 from ..core.bridge import BridgeConfig
 from ..core.generator import initialize_generator
+from ..core.restore import restore_plan
 from ..core.scheme import scheme_for
 from ..core.verifier import DiscoveryVerifier
 
@@ -40,6 +42,8 @@ NAMESPACE = "discovery"
 HA_PREFIX = "homeassistant"
 # Coalesce the cold-start burst of retained config messages into one recompute.
 DEBOUNCE_SEC = 0.3
+# Where pre-write snapshots are saved for undo (same format/rotation as the CLI).
+BACKUP_DIR = ".rustuya-ha-backups"
 
 
 class DiscoveryPlugin:
@@ -58,6 +62,7 @@ class DiscoveryPlugin:
         self.retained: Dict[str, Dict[str, Any]] = {}
         self.config_source = "default"
         self.namespace = None  # set by register() to ctx.state_namespace(...)
+        self.backup_dir = BACKUP_DIR
         self._dirty = False
         self._push_task: Optional[asyncio.Task] = None
 
@@ -183,6 +188,79 @@ class DiscoveryPlugin:
         results = self.compute()
         await self.namespace.set(self.summarize(results))
 
+    # ── write actions (M3) ───────────────────────────────────────────────
+    # All mutate retained `homeassistant/.../config` topics via the host's
+    # generic `publish_raw`. The broker echoes each retained write back through
+    # our `homeassistant/#` tap, which updates `self.retained` and re-pushes the
+    # namespace — so the UI refreshes itself after a write with no extra plumbing.
+    def _devices_by_id(self) -> Dict[str, Dict[str, Any]]:
+        return {did: raw for did, raw in self.ctx.devices().items()}
+
+    async def _execute(self, msgs: List[Dict[str, Any]]) -> str:
+        """Snapshot current retained state (undo point), then publish each
+        message retained. Returns the backup file path."""
+        path = backup.save(self.backup_dir, self.retained, prefix="auto")
+        client = self.ctx.bridge_client
+        for m in msgs:
+            await client.publish_raw(m["topic"], m["payload"], retain=m.get("retain", True))
+        return path
+
+    async def publish(self, ids: List[str], dry_run: bool = False) -> Dict[str, Any]:
+        """(Re)publish discovery for the given device ids. Clears each device's
+        own stale topics first, then publishes its expected payloads."""
+        self._apply_bridge_config()
+        by_id = self._devices_by_id()
+        devices = [by_id[i] for i in ids if i in by_id]
+        unknown = [i for i in ids if i not in by_id]
+        msgs, per_device, errors = plan.publish_plan(devices, self.generator, self.retained)
+        result = {
+            "action": "publish", "dry_run": dry_run, "per_device": per_device,
+            "errors": errors, "unknown_ids": unknown, "msg_count": len(msgs),
+        }
+        if dry_run or not msgs:
+            result["executed"] = False
+            return result
+        result["backup"] = await self._execute(msgs)
+        result["executed"] = True
+        return result
+
+    async def clear(self, ids: List[str], dry_run: bool = False) -> Dict[str, Any]:
+        """Clear all retained discovery topics owned by the given device ids."""
+        msgs, per_device = plan.clear_plan(self.retained, ids)
+        result = {
+            "action": "clear", "dry_run": dry_run,
+            "per_device": per_device, "msg_count": len(msgs),
+        }
+        if dry_run or not msgs:
+            result["executed"] = False
+            return result
+        result["backup"] = await self._execute(msgs)
+        result["executed"] = True
+        return result
+
+    async def restore(self, file: Optional[str] = None, dry_run: bool = False) -> Dict[str, Any]:
+        """Revert retained discovery to a saved snapshot (full-scope undo):
+        re-publish the snapshot's topics and clear any topics added since."""
+        path = file or backup.latest(self.backup_dir)
+        if not path:
+            return {"action": "restore", "error": "no backup found", "executed": False}
+        snapshot = backup.load(path)
+        set_msgs, clear_msgs = restore_plan(snapshot, list(self.retained.keys()))
+        msgs = clear_msgs + set_msgs
+        result = {
+            "action": "restore", "from": str(path), "set": len(set_msgs),
+            "clear": len(clear_msgs), "dry_run": dry_run, "msg_count": len(msgs),
+        }
+        if dry_run or not msgs:
+            result["executed"] = False
+            return result
+        result["backup"] = await self._execute(msgs)  # snapshot pre-restore too
+        result["executed"] = True
+        return result
+
+    def list_backups(self) -> List[Dict[str, str]]:
+        return [{"name": p.name, "path": str(p)} for p in backup.listing(self.backup_dir)]
+
 
 def register(ctx: Any) -> None:
     """Entry-point hook the manager's plugin host calls once at startup.
@@ -205,13 +283,41 @@ def register(ctx: Any) -> None:
     # Imported lazily: the manager (and thus fastapi) is only present when this
     # plugin actually runs inside the host, so the module stays importable for
     # unit tests without fastapi installed.
-    from fastapi import APIRouter
+    from fastapi import APIRouter, Body, HTTPException
 
     router = APIRouter()
 
     @router.get("/api/discovery/status")
     async def discovery_status() -> Dict[str, Any]:
         return plugin.status()
+
+    @router.get("/api/discovery/backups")
+    async def discovery_backups() -> Dict[str, Any]:
+        return {"backups": plugin.list_backups()}
+
+    # publish/clear take {ids: [...], dry_run: bool}; restore takes {file?, dry_run}.
+    # A RuntimeError from publish_raw means the broker is down → surface as 503 so
+    # the UI can toast "try again" rather than failing opaquely.
+    @router.post("/api/discovery/publish")
+    async def discovery_publish(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        try:
+            return await plugin.publish(body.get("ids", []), bool(body.get("dry_run", False)))
+        except RuntimeError as e:
+            raise HTTPException(status_code=503, detail=str(e)) from e
+
+    @router.post("/api/discovery/clear")
+    async def discovery_clear(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        try:
+            return await plugin.clear(body.get("ids", []), bool(body.get("dry_run", False)))
+        except RuntimeError as e:
+            raise HTTPException(status_code=503, detail=str(e)) from e
+
+    @router.post("/api/discovery/restore")
+    async def discovery_restore(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        try:
+            return await plugin.restore(body.get("file"), bool(body.get("dry_run", False)))
+        except RuntimeError as e:
+            raise HTTPException(status_code=503, detail=str(e)) from e
 
     ctx.add_api_router(router)
 

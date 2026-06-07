@@ -5,11 +5,12 @@ import time
 import logging
 import fnmatch
 from collections import defaultdict
-from typing import Dict, List, Set
+from typing import Dict, List
 
 from ..core.generator import initialize_generator
 from ..core.bridge import BridgeConfig
 from ..core.scheme import scheme_for
+from ..core import plan
 from . import render
 from . import backup
 from ..core.verifier import (
@@ -222,44 +223,16 @@ class DiscoveryManager:
                 print(f"❌ No devices match {pattern!r} with categories {categories}")
                 return
 
-        # Build new payloads for matching devices
-        new_topics: Dict[str, Dict[str, dict]] = {}  # dev_id -> {topic -> payload}
-        for d in matches:
-            try:
-                payloads, _ = self.generator.generate(d)
-                new_topics[d['id']] = payloads
-            except Exception as e:
-                logger.error(f"Generator failed for {d['id']}: {e}")
-
-        existing: Dict[str, Set[str]] = defaultdict(set)
-        for topic, msg in self.mqtt_data.items():
-            ids = msg["payload"].get("device", {}).get("identifiers", [])
-            if ids and ids[0] in new_topics:
-                existing[ids[0]].add(topic)
-
-        # Compute stale + new per device
-        msgs = []
-        n_clear = n_publish = 0
-        per_device_lines = []
-        for d in matches:
-            dev_id = d['id']
-            new = new_topics.get(dev_id, {})
-            old = existing.get(dev_id, set())
-            stale = old - set(new)
-            for t in sorted(stale):
-                msgs.append({"topic": t, "payload": "", "retain": True})
-                n_clear += 1
-            for t in sorted(new):
-                msgs.append({"topic": t, "payload": json.dumps(new[t]), "retain": True})
-                n_publish += 1
-            per_device_lines.append(
-                f"  {d.get('name', dev_id)} ({dev_id}): "
-                f"+{len(new)} publish, -{len(stale)} clear"
-            )
+        # Build the publish plan (pure, shared with the manager plugin).
+        msgs, per_device, gen_errors = plan.publish_plan(matches, self.generator, self.mqtt_data)
+        for err in gen_errors:
+            logger.error(f"Generator failed for {err['id']}: {err['error']}")
+        n_publish = sum(p["publish"] for p in per_device)
+        n_clear = sum(p["clear"] for p in per_device)
 
         print(f"\n📋 publish plan for {len(matches)} device(s):")
-        for line in per_device_lines:
-            print(line)
+        for p in per_device:
+            print(f"  {p['name']} ({p['id']}): +{p['publish']} publish, -{p['clear']} clear")
         print(f"\nTotal: {n_publish} publish, {n_clear} clear stale, {len(msgs)} MQTT msgs")
 
         if dry_run:
@@ -307,12 +280,10 @@ class DiscoveryManager:
                     if entry.get('id') in matched_ids:
                         topics_by_dev[entry['id']].extend(entry.get('unexpected', []))
         else:
-            # All retained topics whose payload device-id matches
-            topics_by_dev = defaultdict(list)
-            for topic, msg in self.mqtt_data.items():
-                ids = msg["payload"].get("device", {}).get("identifiers", [])
-                if ids and ids[0] in matched_ids:
-                    topics_by_dev[ids[0]].append(topic)
+            # All retained topics whose payload device-id matches.
+            topics_by_dev = {
+                k: list(v) for k, v in plan.owned_topics(self.mqtt_data, matched_ids).items()
+            }
 
         total = sum(len(t) for t in topics_by_dev.values())
         label = "stale" if stale_only else "ALL"
@@ -337,11 +308,7 @@ class DiscoveryManager:
             print("aborted.")
             return
 
-        msgs = [
-            {"topic": t, "payload": "", "retain": True}
-            for topics in topics_by_dev.values()
-            for t in set(topics)
-        ]
+        msgs, _ = plan.clear_plan(self.mqtt_data, matched_ids, topics_by_dev=topics_by_dev)
         self._auto_backup()
         self._publish(msgs)
         print(f"✅ cleared {total} topic(s).")
