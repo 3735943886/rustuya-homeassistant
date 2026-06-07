@@ -53,6 +53,25 @@ def _rotate(d: Path, prefix: str):
             pass
 
 
+def snapshot_file(backup_dir: str, src: str, prefix: str = "converters") -> Optional[str]:
+    """Copy an existing file (e.g. the converters JSON) into the backup dir under
+    a timestamped name, so a write that overwrites it is undoable. Returns the
+    backup path, or None if the source doesn't exist yet (nothing to back up)."""
+    s = Path(src)
+    if not s.exists():
+        return None
+    d = Path(backup_dir)
+    d.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    dst = d / f"{prefix}-{stamp}.json"
+    n = 1
+    while dst.exists():
+        dst = d / f"{prefix}-{stamp}-{n}.json"
+        n += 1
+    dst.write_text(s.read_text(encoding="utf-8"), encoding="utf-8")
+    return str(dst)
+
+
 def load(path: str) -> Dict[str, dict]:
     """Return the {topic: payload} map from a backup file."""
     with open(path, encoding="utf-8") as f:

@@ -158,7 +158,7 @@ function renderControls(data, view, rerender) {
   search.type = "search";
   search.placeholder = "search name / id…";
   search.value = view.search;
-  search.dataset.discoverySearch = "1";
+  search.dataset.keepFocus = "search";
   search.addEventListener("input", () => {
     view.search = search.value;
     rerender();
@@ -399,6 +399,187 @@ function renderErrors(data) {
   return box;
 }
 
+// ── custom converters editor (M5) ────────────────────────────────────────
+function jsonPretty(obj) {
+  try {
+    return JSON.stringify(obj, null, 2);
+  } catch {
+    return "";
+  }
+}
+
+function selectProduct(view, pid) {
+  const c = view.conv;
+  c.selected = pid;
+  const existing = c.info && c.info.converters ? c.info.converters[pid] : null;
+  c.text = existing ? jsonPretty(existing) : jsonPretty({ model: "", dp_meta: {} });
+  c.preview = null;
+}
+
+async function loadConverters(ctx, view, rerender) {
+  view.conv.busy = true;
+  rerender();
+  try {
+    const info = await ctx.api("/api/discovery/converters");
+    view.conv.info = info;
+    view.conv.loaded = true;
+    const pids = (info.products || []).map((p) => p.product_id);
+    const keep = view.conv.selected && pids.includes(view.conv.selected)
+      ? view.conv.selected
+      : pids[0];
+    if (keep) selectProduct(view, keep);
+  } catch (e) {
+    ctx.toast && ctx.toast(`converters: ${e.message}`, "error");
+  } finally {
+    view.conv.busy = false;
+    rerender();
+  }
+}
+
+function parseOverride(text) {
+  const t = text.trim();
+  if (t === "" || t === "null") return null; // null = delete the override
+  return JSON.parse(t); // throws on malformed JSON (caller toasts)
+}
+
+async function convAction(ctx, view, rerender, kind) {
+  const c = view.conv;
+  if (!c.selected) return;
+  let override;
+  try {
+    override = kind === "delete" ? null : parseOverride(c.text);
+  } catch (e) {
+    ctx.toast && ctx.toast(`invalid JSON: ${e.message}`, "error");
+    return;
+  }
+  if (kind === "preview") {
+    try {
+      c.preview = await ctx.api("/api/discovery/converters/preview", {
+        method: "POST",
+        body: { product_id: c.selected, override },
+      });
+      rerender();
+    } catch (e) {
+      ctx.toast && ctx.toast(`preview: ${e.message}`, "error");
+    }
+    return;
+  }
+  const msg = kind === "delete"
+    ? `Delete the override for ${c.selected}?`
+    : `Save the override for ${c.selected}?\nThis changes what Publish emits for its device(s).`;
+  const ok = ctx.confirm
+    ? await ctx.confirm({ title: `converter ${kind}`, message: msg, okLabel: kind, danger: kind === "delete" })
+    : true;
+  if (!ok) return;
+  try {
+    const res = await ctx.api("/api/discovery/converters/save", {
+      method: "POST",
+      body: { product_id: c.selected, override },
+    });
+    ctx.toast &&
+      ctx.toast(`converter ${res.deleted ? "deleted" : "saved"}${res.backup ? " · backup" : ""}`, "ok");
+    await loadConverters(ctx, view, rerender); // refresh has-override + canonical text
+  } catch (e) {
+    ctx.toast && ctx.toast(`${kind}: ${e.message}`, "error");
+  }
+}
+
+function renderConvPreview(preview) {
+  const box = el("div", "mt-2 p-2 rounded bg-slate-50 dark:bg-slate-800/40 text-xs space-y-2");
+  box.appendChild(
+    el("div", "font-medium", `Preview — ${preview.product_id} (${(preview.devices || []).length} device(s))`),
+  );
+  for (const d of preview.devices || []) {
+    const b = el("div");
+    if (d.error) {
+      b.appendChild(el("div", "text-rose-600 dark:text-rose-400", `${d.name} (${d.id}): ${d.error}`));
+    } else {
+      const topics = Object.keys(d.topics || {});
+      b.appendChild(
+        el("div", "font-medium", `${d.name} (${d.id}) — ${topics.length} topic(s) · ${d.source || ""}`),
+      );
+      const pre = el("pre", "font-mono whitespace-pre-wrap text-slate-500 dark:text-slate-400");
+      pre.textContent = jsonPretty(d.topics);
+      b.appendChild(pre);
+    }
+    box.appendChild(b);
+  }
+  return box;
+}
+
+function renderConverters(ctx, view, rerender) {
+  const c = view.conv;
+  const wrap = el("div", "mt-4 border-t border-slate-200 dark:border-slate-700 pt-3");
+  wrap.appendChild(
+    btn(`${c.open ? "▾" : "▸"} Custom converters`, "text-sm font-semibold mb-2", () => {
+      c.open = !c.open;
+      if (c.open && !c.loaded) loadConverters(ctx, view, rerender);
+      else rerender();
+    }),
+  );
+  if (!c.open) return wrap;
+  if (!c.loaded) {
+    wrap.appendChild(el("div", "text-xs text-slate-500", c.busy ? "loading…" : ""));
+    return wrap;
+  }
+  const info = c.info || { products: [], converters: {}, save_path: "" };
+
+  const row = el("div", "flex flex-wrap gap-2 items-center mb-2");
+  const sel = el(
+    "select",
+    "px-2 py-1 rounded border border-slate-300 dark:border-slate-600 bg-transparent text-sm",
+  );
+  if (!info.products.length) {
+    sel.appendChild(el("option", null, "(no product_ids in fleet)"));
+    sel.disabled = true;
+  }
+  for (const pr of info.products) {
+    const o = el(
+      "option",
+      null,
+      `${pr.product_id} · ${pr.device_ids.length} dev${pr.has_override ? " ✏" : ""}`,
+    );
+    o.value = pr.product_id;
+    if (pr.product_id === c.selected) o.selected = true;
+    sel.appendChild(o);
+  }
+  sel.addEventListener("change", () => {
+    selectProduct(view, sel.value);
+    rerender();
+  });
+  row.appendChild(sel);
+  wrap.appendChild(row);
+
+  const ta = el(
+    "textarea",
+    "w-full h-48 font-mono text-xs p-2 rounded border border-slate-300 dark:border-slate-600 bg-transparent",
+  );
+  ta.value = c.text;
+  ta.dataset.keepFocus = "conv-text";
+  ta.spellcheck = false;
+  ta.placeholder = '{"model": "...", "dp_meta": { "1": { ... } }}  — empty or "null" deletes';
+  ta.addEventListener("input", () => {
+    c.text = ta.value;
+  });
+  if (sel.disabled) ta.disabled = true;
+  wrap.appendChild(ta);
+
+  const acts = el("div", "flex flex-wrap gap-2 mt-2 items-center");
+  const previewBtn = btn("Preview", BTN_GHOST, () => convAction(ctx, view, rerender, "preview"));
+  const saveBtn = btn("Save", BTN_PRIMARY, () => convAction(ctx, view, rerender, "save"));
+  previewBtn.disabled = saveBtn.disabled = !c.selected;
+  acts.appendChild(previewBtn);
+  acts.appendChild(saveBtn);
+  if (c.selected && info.converters && c.selected in info.converters) {
+    acts.appendChild(btn("Delete override", BTN_DANGER, () => convAction(ctx, view, rerender, "delete")));
+  }
+  acts.appendChild(el("span", "text-xs text-slate-400 ml-auto", `saves to ${info.save_path || "?"}`));
+  wrap.appendChild(acts);
+
+  if (c.preview) wrap.appendChild(renderConvPreview(c.preview));
+  return wrap;
+}
+
 export async function mount(rootEl, ctx) {
   rootEl.innerHTML = "";
   const container = el("div", "p-2");
@@ -410,15 +591,20 @@ export async function mount(rootEl, ctx) {
   rootEl.appendChild(container);
 
   // View state persists across re-renders (live pushes + filter/sort/expand).
-  const view = { search: "", category: null, sort: "category", expanded: new Set() };
+  const view = {
+    search: "", category: null, sort: "category", expanded: new Set(),
+    conv: { open: false, loaded: false, info: null, selected: "", text: "", preview: null, busy: false },
+  };
   let lastData = null;
 
   function render() {
     const data = lastData;
-    // Preserve search focus + caret across the full rebuild.
-    const prev = body.querySelector("input[data-discovery-search]");
-    const focused = prev && document.activeElement === prev;
-    const caret = prev ? prev.selectionStart : null;
+    // Preserve focus + caret of the active editable across the full rebuild
+    // (search box / converters textarea), keyed by its data-keep-focus id.
+    const active = document.activeElement;
+    const keep = active && body.contains(active) ? active.dataset.keepFocus : null;
+    const selS = keep ? active.selectionStart : null;
+    const selE = keep ? active.selectionEnd : null;
 
     body.innerHTML = "";
     if (!data) {
@@ -433,12 +619,17 @@ export async function mount(rootEl, ctx) {
     body.appendChild(renderGrid(ctx, data, view, render));
     const errs = renderErrors(data);
     if (errs) body.appendChild(errs);
+    body.appendChild(renderConverters(ctx, view, render));
 
-    if (focused) {
-      const next = body.querySelector("input[data-discovery-search]");
+    if (keep) {
+      const next = body.querySelector(`[data-keep-focus="${keep}"]`);
       if (next) {
         next.focus();
-        if (caret != null) next.setSelectionRange(caret, caret);
+        try {
+          if (selS != null) next.setSelectionRange(selS, selE);
+        } catch {
+          /* element type may not support selection range */
+        }
       }
     }
   }

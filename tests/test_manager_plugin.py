@@ -336,6 +336,77 @@ def test_list_backups(tmp_path):
     assert len(names) == 1 and names[0].startswith("auto-")
 
 
+# ── custom converters editing (M5) ───────────────────────────────────────
+def _isolated_converters(monkeypatch, tmp_path):
+    """Point converter resolution at a non-existent tmp file (empty mapping),
+    so tests don't read/write the repo's or the packaged converters."""
+    conv = tmp_path / "conv.json"
+    monkeypatch.setenv("RUSTUYA_CONVERTERS", str(conv))
+    return conv
+
+
+def test_converters_info_lists_fleet_products(monkeypatch, tmp_path):
+    _isolated_converters(monkeypatch, tmp_path)
+    ctx = FakeCtx(devices=DEVICES, bridge_cfg=LEGACY_CFG)
+    p = DiscoveryPlugin(ctx)
+    info = p.converters_info()
+    pids = {pr["product_id"] for pr in info["products"]}
+    assert pids == {d["product_id"] for d in DEVICES if d.get("product_id")}
+    assert all(pr["has_override"] is False for pr in info["products"])  # empty file
+    assert info["converters"] == {}
+
+
+def test_preview_converter_applies_override(monkeypatch, tmp_path):
+    _isolated_converters(monkeypatch, tmp_path)
+    ctx = FakeCtx(devices=DEVICES, bridge_cfg=LEGACY_CFG)
+    p = DiscoveryPlugin(ctx)
+    pid = DEVICES[0]["product_id"]
+    base = p.preview_converter(pid, None)
+    over = p.preview_converter(pid, {"model": "ZZZ-CUSTOM"})
+    assert over != base
+    assert "ZZZ-CUSTOM" in json.dumps(over)  # custom model flows into the payload
+    assert over["devices"] and all("error" not in d for d in over["devices"])
+
+
+def test_preview_converter_rejects_non_dict(monkeypatch, tmp_path):
+    _isolated_converters(monkeypatch, tmp_path)
+    p = DiscoveryPlugin(FakeCtx(devices=DEVICES, bridge_cfg=LEGACY_CFG))
+    with pytest.raises(ValueError, match="JSON object"):
+        p.preview_converter(DEVICES[0]["product_id"], ["not", "a", "dict"])
+
+
+def test_save_converter_persists_backs_up_and_reloads(monkeypatch, tmp_path):
+    conv = _isolated_converters(monkeypatch, tmp_path)
+    ctx = FakeCtx(devices=DEVICES, bridge_cfg=LEGACY_CFG)
+    p = DiscoveryPlugin(ctx)
+    p.backup_dir = str(tmp_path / "bk")
+    pid = DEVICES[0]["product_id"]
+
+    res = p.save_converter(pid, {"model": "SAVED-Y"})
+    assert res["saved"] and res["deleted"] is False and res["backup"] is None  # no prior file
+    assert json.load(open(conv))[pid]["model"] == "SAVED-Y"
+    # generator reloaded from disk → it now applies the saved override
+    payloads, _ = p.generator.generate(DEVICES[0])
+    assert "SAVED-Y" in json.dumps(payloads)
+
+    # second save backs up the prior file
+    res2 = p.save_converter(pid, {"model": "SAVED-Z"})
+    assert res2["backup"] is not None and Path(res2["backup"]).is_file()
+
+    # delete removes the product's override
+    res3 = p.save_converter(pid, None)
+    assert res3["deleted"] is True and pid not in json.load(open(conv))
+
+
+def test_save_converter_refuses_broken_override(monkeypatch, tmp_path):
+    conv = _isolated_converters(monkeypatch, tmp_path)
+    p = DiscoveryPlugin(FakeCtx(devices=DEVICES, bridge_cfg=LEGACY_CFG))
+    p.backup_dir = str(tmp_path / "bk")
+    with pytest.raises(ValueError):
+        p.save_converter(DEVICES[0]["product_id"], {"dp_meta": "not-a-dict"})
+    assert not conv.exists()  # nothing persisted on refusal
+
+
 # ── register() wiring (needs fastapi) ────────────────────────────────────
 def test_register_wires_host_surfaces():
     pytest.importorskip("fastapi")

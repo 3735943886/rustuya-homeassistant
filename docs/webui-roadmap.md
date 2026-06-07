@@ -46,15 +46,15 @@ largely done; the remaining work is the plumbing into the manager + the UI.
 Each milestone is an independently shippable slice. **Decision gate after M2** —
 validate the whole pipeline before investing in write-actions and polish.
 
-> **Status — 2026-06-08.** M0–M4 (incl. M1.5, M-host+) ✅ done and verified. The
-> "HA Discovery" tab is now feature-complete vs the CLI: live status grid, search
-> / category-filter / sort, expandable per-device field diffs, and per-device/bulk
-> publish · clear · restore (dry-run preview + confirm, auto-backup undo) — all
-> through the host-agnostic plugin contract. **Only optional work remains:** M5
-> (inline `custom_converters` editing — the one UI-only win over the CLI) and
-> M-host++ (frontend page-host e2e hardening). Consider a stable `v0.1.0` PyPI
-> release of rustuya-ha once exercised on real hardware. Milestone
-> numbers/anchors below are pinned to verified current code.
+> **Status — 2026-06-08.** **M0–M5 (incl. M1.5, M-host+) ✅ done and verified — the
+> roadmap is functionally complete.** The "HA Discovery" tab now does everything
+> the CLI can and more: live status grid with search / category-filter / sort,
+> expandable per-device field diffs, per-device/bulk publish · clear · restore
+> (dry-run preview + confirm, auto-backup undo), and inline `custom_converters`
+> editing (preview + save/delete) — all through the host-agnostic plugin contract.
+> **Only optional hardening remains:** M-host++ (frontend page-host e2e). Next
+> real milestone is a stable `v0.1.0` PyPI release of rustuya-ha once exercised on
+> real hardware. Milestone numbers/anchors below are pinned to verified code.
 
 ### M0 — Publish `rustuya-ha` to PyPI  *(prereq, ~0.5d)*  ✅ DONE
 The plugin ships inside the rustuya-ha package, so it must be pip-installable.
@@ -173,10 +173,27 @@ HA-agnostic plugin host:
   **213 pass**.
 - **Done:** UI reaches feature parity with the CLI's `status --detail`.
 
-### M5 — Inline `custom_converters` editing  *(optional, later, ~1–2d)*
-- Edit per-DP entity overrides in the UI, persist, live-preview regeneration.
-- **Done:** an entity can be remapped without hand-editing JSON. (The biggest
-  UI-only win over the CLI; intentionally last.)
+### M5 — Inline `custom_converters` editing  *(rustuya-ha)*  ✅ DONE & VERIFIED
+- Edit per-product_id overrides (model / dp_meta / discovery_overrides) in the UI,
+  with a live **preview** (regenerate discovery for that product's devices before
+  saving) and **save / delete**. Persists to the *same* file the generator & CLI
+  resolve (`$RUSTUYA_CONVERTERS` → `./custom_converters.json`), so UI and CLI
+  share one source; writes never touch the packaged example (redirected to CWD).
+- Persistence helpers in pure core: `converter.savable_path` / `load_converters`
+  / `save_converters` (atomic) + `backup.snapshot_file` (timestamped pre-write
+  backup of the converters file). Save refuses an override that breaks generation
+  (→ HTTP 400) and reloads the generator so subsequent status/publish use it.
+- API: `GET /api/discovery/converters`, `POST /api/discovery/converters/{preview,save}`.
+- Frontend: collapsible "Custom converters" section — product_id picker (✏ marks
+  ones with an override), JSON editor (textarea keeps focus across live pushes),
+  Preview (shows regenerated topics/payloads or per-device errors), Save/Delete
+  (confirm). After save the grid auto-refreshes (those devices flip to
+  mismatched_payload until Published).
+- **Verified:** core/plugin unit tests (info/preview/save/delete/refuse-broken) +
+  E2E through the manager build_app (list → preview applies override → bad
+  override 400 → save writes file → delete + backup). rustuya-ha **218 pass**.
+- **Done:** an entity can be remapped without hand-editing JSON — then previewed,
+  saved, and published, all from the UI. (The biggest UI-only win over the CLI.)
 
 ### M-host++ — Frontend page-host e2e  *(rustuya-manager, optional hardening)*
 The host backend has 21 tests; the `plugins.js` tab-bar/mount path has none.

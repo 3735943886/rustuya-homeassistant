@@ -27,7 +27,7 @@ import logging
 import os
 from typing import Any, Dict, List, Optional
 
-from ..core import backup, plan
+from ..core import backup, converter, plan
 from ..core.bridge import BridgeConfig
 from ..core.detail import device_detail, has_detail
 from ..core.generator import initialize_generator
@@ -68,21 +68,32 @@ class DiscoveryPlugin:
         self._push_task: Optional[asyncio.Task] = None
 
     # ── bridge scheme ────────────────────────────────────────────────────
+    def _scheme(self):
+        """Resolve (scheme, codec) from the host's live bridge config, or None
+        when none is available yet (caller keeps the generator's legacy default).
+        Also records `config_source` for the UI badge."""
+        cfg_dict = self.ctx.bridge_config()
+        if cfg_dict:
+            self.config_source = "bridge"
+            return scheme_for(BridgeConfig.from_dict(cfg_dict))
+        self.config_source = "default"
+        return None
+
     def _apply_bridge_config(self) -> None:
         """Point the generator at the bridge's live topic/payload scheme.
 
-        Reads the raw bridge config the host exposes (``ctx.bridge_config()``)
-        and derives the scheme/codec — the same resolution the CLI does, minus
-        the file/legacy fallbacks (the host already owns the live config). When
-        no bridge config is available yet, the generator keeps its built-in
-        default scheme, which reproduces the legacy hardcoded layout."""
-        cfg_dict = self.ctx.bridge_config()
-        if cfg_dict:
-            cfg = BridgeConfig.from_dict(cfg_dict)
-            self.generator.scheme, self.generator.codec = scheme_for(cfg)
-            self.config_source = "bridge"
-        else:
-            self.config_source = "default"
+        The same resolution the CLI does, minus the file/legacy fallbacks (the
+        host already owns the live config). With no bridge config the generator
+        keeps its built-in default scheme (the legacy hardcoded layout)."""
+        s = self._scheme()
+        if s:
+            self.generator.scheme, self.generator.codec = s
+
+    def _reload_generator(self) -> None:
+        """Rebuild the generator so it re-reads the converters file from disk
+        (after an edit). The verifier holds the same generator reference."""
+        self.generator = initialize_generator()
+        self.verifier.generator = self.generator
 
     # ── retained-state maintenance ───────────────────────────────────────
     def update_retained(self, topic: str, payload: str) -> bool:
@@ -268,6 +279,95 @@ class DiscoveryPlugin:
     def list_backups(self) -> List[Dict[str, str]]:
         return [{"name": p.name, "path": str(p)} for p in backup.listing(self.backup_dir)]
 
+    # ── custom converters editing (M5) ───────────────────────────────────
+    # Edits the same per-product_id override file the generator/CLI resolve
+    # (RUSTUYA_CONVERTERS / ./custom_converters.json), so UI and CLI share one
+    # source. Writes never touch the packaged example (redirected to CWD).
+    def converters_info(self) -> Dict[str, Any]:
+        """Current converters mapping + the product_ids present in the fleet
+        (with their device ids/names and whether an override exists)."""
+        mapping = converter.load_converters()
+        products: Dict[str, Dict[str, Any]] = {}
+        for did, raw in self.ctx.devices().items():
+            pid = raw.get("product_id")
+            if not pid:
+                continue
+            e = products.setdefault(
+                pid,
+                {"product_id": pid, "device_ids": [], "device_names": [],
+                 "has_override": pid in mapping},
+            )
+            e["device_ids"].append(did)
+            e["device_names"].append(raw.get("name", did))
+        return {
+            "path": str(converter.resolve_path(None)),
+            "save_path": str(converter.savable_path(None)),
+            "converters": mapping,
+            "products": sorted(products.values(), key=lambda x: x["product_id"]),
+        }
+
+    def _generator_with(self, mapping: Dict[str, Any]):
+        """A fresh generator using `mapping` as its converter overrides, with the
+        live bridge scheme applied — for previewing an unsaved edit."""
+        gen = initialize_generator()
+        gen.converter.mapping = mapping
+        s = self._scheme()
+        if s:
+            gen.scheme, gen.codec = s
+        return gen
+
+    @staticmethod
+    def _validate_override(override: Any) -> None:
+        if override is not None and not isinstance(override, dict):
+            raise ValueError("override must be a JSON object (or null to delete)")
+
+    def preview_converter(self, product_id: str, override: Any) -> Dict[str, Any]:
+        """Regenerate discovery for every fleet device of `product_id` using the
+        proposed (unsaved) override. `override=None` previews removal."""
+        self._validate_override(override)
+        merged = dict(converter.load_converters())
+        if override is None:
+            merged.pop(product_id, None)
+        else:
+            merged[product_id] = override
+        gen = self._generator_with(merged)
+        devices = [r for r in self.ctx.devices().values() if r.get("product_id") == product_id]
+        out: List[Dict[str, Any]] = []
+        for d in devices:
+            try:
+                payloads, source = gen.generate(d)
+                out.append({"id": d["id"], "name": d.get("name", d["id"]),
+                            "source": source, "topics": payloads})
+            except Exception as e:  # surface a bad override instead of 500ing
+                out.append({"id": d["id"], "name": d.get("name", d["id"]), "error": str(e)})
+        return {"product_id": product_id, "devices": out}
+
+    def save_converter(self, product_id: str, override: Any) -> Dict[str, Any]:
+        """Persist (or delete, when `override=None`) one product_id's override.
+        Backs up the prior file, refuses an override that crashes generation,
+        then reloads the generator so subsequent status/publish use it."""
+        self._validate_override(override)
+        mapping = dict(converter.load_converters())
+        if override is None:
+            mapping.pop(product_id, None)
+        else:
+            mapping[product_id] = override
+        # Refuse to persist an override that breaks generation for its devices.
+        gen = self._generator_with(mapping)
+        try:
+            for d in self.ctx.devices().values():
+                if d.get("product_id") == product_id:
+                    gen.generate(d)
+        except Exception as e:  # any generation failure → 400, not a 500
+            raise ValueError(f"override breaks generation: {e}") from e
+        backup_path = backup.snapshot_file(
+            self.backup_dir, str(converter.savable_path(None)), prefix="converters"
+        )
+        path = converter.save_converters(mapping)
+        self._reload_generator()
+        return {"product_id": product_id, "saved": True, "deleted": override is None,
+                "path": path, "backup": backup_path}
+
 
 def register(ctx: Any) -> None:
     """Entry-point hook the manager's plugin host calls once at startup.
@@ -325,6 +425,28 @@ def register(ctx: Any) -> None:
             return await plugin.restore(body.get("file"), bool(body.get("dry_run", False)))
         except RuntimeError as e:
             raise HTTPException(status_code=503, detail=str(e)) from e
+
+    # custom_converters editing (M5). preview/save take {product_id, override}
+    # where override is a JSON object (or null to delete the product's override).
+    @router.get("/api/discovery/converters")
+    async def discovery_converters() -> Dict[str, Any]:
+        return plugin.converters_info()
+
+    @router.post("/api/discovery/converters/preview")
+    async def discovery_converters_preview(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        try:
+            return plugin.preview_converter(body["product_id"], body.get("override"))
+        except (KeyError, ValueError) as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+
+    @router.post("/api/discovery/converters/save")
+    async def discovery_converters_save(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        try:
+            res = plugin.save_converter(body["product_id"], body.get("override"))
+        except (KeyError, ValueError) as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        await plugin.push()  # converter change may shift categories → refresh grid
+        return res
 
     ctx.add_api_router(router)
 

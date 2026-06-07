@@ -89,6 +89,33 @@ def resolve_path(path: Optional[str] = None) -> Path:
     return PACKAGED_PATH
 
 
+def savable_path(path: Optional[str] = None) -> Path:
+    """Where to *write* converter edits — same as `resolve_path` except never the
+    bundled package file. Editing the packaged example would mutate installed
+    package data; redirect to a user file in CWD instead, which `resolve_path`
+    then picks up first on the next load (so reads and writes stay consistent)."""
+    target = resolve_path(path)
+    return Path(FILENAME) if target == PACKAGED_PATH else target
+
+
+def load_converters(path: Optional[str] = None) -> Dict[str, Any]:
+    """Load the resolved converters mapping (empty dict if none/unreadable)."""
+    return UserConverter(path).mapping
+
+
+def save_converters(mapping: Dict[str, Any], path: Optional[str] = None) -> str:
+    """Atomically write the converters mapping as pretty JSON to `savable_path`.
+    Returns the written path."""
+    target = savable_path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_name(target.name + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(mapping, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    os.replace(tmp, target)
+    return str(target)
+
+
 class UserConverter:
     def __init__(self, path: Optional[str] = None):
         self.path = resolve_path(path)
