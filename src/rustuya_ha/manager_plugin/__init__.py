@@ -29,6 +29,7 @@ from typing import Any, Dict, List, Optional
 
 from ..core import backup, plan
 from ..core.bridge import BridgeConfig
+from ..core.detail import device_detail, has_detail
 from ..core.generator import initialize_generator
 from ..core.restore import restore_plan
 from ..core.scheme import scheme_for
@@ -128,15 +129,21 @@ class DiscoveryPlugin:
                          "category": "orphans", "topics": d.get("topics", [])}
                     )
                 elif "id" in d:
-                    devices.append(
-                        {"id": d["id"], "name": d.get("name", d["id"]),
-                         "category": cat,
-                         "matched": len(d.get("matched", [])),
-                         "mismatched": len(d.get("mismatched", [])),
-                         "missing": len(d.get("missing", [])),
-                         "unexpected": len(d.get("unexpected", [])),
-                         "expected": d.get("expected_count", 0)}
-                    )
+                    row = {
+                        "id": d["id"], "name": d.get("name", d["id"]),
+                        "category": cat,
+                        "matched": len(d.get("matched", [])),
+                        "mismatched": len(d.get("mismatched", [])),
+                        "missing": len(d.get("missing", [])),
+                        "unexpected": len(d.get("unexpected", [])),
+                        "expected": d.get("expected_count", 0),
+                    }
+                    # Attach compact drill-in detail only for rows that have a
+                    # diff/missing/unexpected — keeps the WS namespace payload lean
+                    # (perfect rows carry just their counts).
+                    if has_detail(d):
+                        row["detail"] = device_detail(d)
+                    devices.append(row)
         devices.sort(key=lambda x: (x["category"], str(x["id"])))
         return {
             "counts": counts,

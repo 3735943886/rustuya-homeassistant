@@ -46,14 +46,15 @@ largely done; the remaining work is the plumbing into the manager + the UI.
 Each milestone is an independently shippable slice. **Decision gate after M2** —
 validate the whole pipeline before investing in write-actions and polish.
 
-> **Status — 2026-06-08.** M0 ✅, M1 ✅, M1.5 ✅, M-host+ ✅, M2 ✅, **and M3 ✅**
-> are done and verified. The decision gate passed and write actions landed: with
-> both packages installed the manager's "HA Discovery" tab now does a live status
-> grid **plus** per-device/bulk publish · clear · restore (dry-run preview +
-> confirm, auto-backup undo), all through the host-agnostic plugin contract. Next
-> critical-path step is **M4** (drill-in field diffs + grid polish). Remaining
-> manager-side work is only the optional **M-host++** frontend e2e hardening.
-> Milestone numbers/anchors below are pinned to verified current code.
+> **Status — 2026-06-08.** M0–M4 (incl. M1.5, M-host+) ✅ done and verified. The
+> "HA Discovery" tab is now feature-complete vs the CLI: live status grid, search
+> / category-filter / sort, expandable per-device field diffs, and per-device/bulk
+> publish · clear · restore (dry-run preview + confirm, auto-backup undo) — all
+> through the host-agnostic plugin contract. **Only optional work remains:** M5
+> (inline `custom_converters` editing — the one UI-only win over the CLI) and
+> M-host++ (frontend page-host e2e hardening). Consider a stable `v0.1.0` PyPI
+> release of rustuya-ha once exercised on real hardware. Milestone
+> numbers/anchors below are pinned to verified current code.
 
 ### M0 — Publish `rustuya-ha` to PyPI  *(prereq, ~0.5d)*  ✅ DONE
 The plugin ships inside the rustuya-ha package, so it must be pip-installable.
@@ -155,10 +156,21 @@ HA-agnostic plugin host:
   backups listing). rustuya-ha **209 pass**.
 - **Done:** discovery can be reconciled entirely from the UI; undo works.
 
-### M4 — Drill-in diffs + parity polish  *(~1–1.5d)*
-- Expand a device → field-level diffs (reuse `status --detail` logic).
-- Filters / search / sort like the manager grid; a badge for the bridge-config
-  source (file / MQTT / legacy).
+### M4 — Drill-in diffs + parity polish  *(rustuya-ha)*  ✅ DONE & VERIFIED
+- Expand a device row → field-level diffs (actual → expected per changed key)
+  plus its missing / unexpected topic lists. The diff reducer lives in pure
+  `core/detail.py` (`topic_field_diffs` / `device_detail` / `has_detail`), shared
+  by the CLI (`render.print_mismatch_details` delegates) and the plugin.
+- Compact detail is embedded only on *problem* grid rows (perfect/no-DP rows stay
+  lean) so the WS namespace payload doesn't bloat.
+- Frontend: client-side search (name/id), clickable category-count chips that
+  filter, a sort selector (status / name / id), expandable rows, and the
+  bridge-config source badge (already shown in the counts bar). Search keeps
+  focus across live re-renders; expansion state survives pushes.
+- **Verified:** `core/detail.py` unit tests + plugin "detail only on problem
+  rows" test + E2E (corrupt one retained topic → that device shows
+  mismatched_payload with the field diff live in the namespace). rustuya-ha
+  **213 pass**.
 - **Done:** UI reaches feature parity with the CLI's `status --detail`.
 
 ### M5 — Inline `custom_converters` editing  *(optional, later, ~1–2d)*

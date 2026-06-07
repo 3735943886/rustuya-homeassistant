@@ -164,6 +164,31 @@ def test_summarize_shape():
         assert {"id", "name", "category"} <= set(row)
 
 
+# ── drill-in detail in the grid (M4) ─────────────────────────────────────
+def test_summarize_attaches_detail_only_for_problem_rows():
+    ctx = FakeCtx(devices=DEVICES, bridge_cfg=LEGACY_CFG)
+    p = DiscoveryPlugin(ctx)
+    retained = _retained_for(DEVICES, LEGACY_CFG)
+    # Corrupt one topic so its owning device becomes mismatched_payload (the
+    # device.identifiers stay intact, so it still resolves to that device).
+    topic = next(iter(retained))
+    retained[topic] = {
+        "payload": {**retained[topic]["payload"], "_corrupt": 1}, "retain": True,
+    }
+    for t, e in retained.items():
+        p.retained[t] = e
+    summary = p.summarize(p.compute())
+
+    mism = [r for r in summary["devices"] if r["category"] == "mismatched_payload"]
+    assert mism, summary["counts"]
+    assert "detail" in mism[0]
+    fields = mism[0]["detail"]["mismatched"][0]["fields"]
+    assert any(f["key"] == "_corrupt" for f in fields)
+    # Perfect rows stay lean — no detail attached.
+    perfect = [r for r in summary["devices"] if r["category"] == "perfect"]
+    assert perfect and all("detail" not in r for r in perfect)
+
+
 # ── on_mqtt debounced push ───────────────────────────────────────────────
 # Driven via asyncio.run() rather than pytest-asyncio (not a repo test dep).
 def test_on_mqtt_pushes_summary_to_namespace():

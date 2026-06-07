@@ -120,17 +120,24 @@ async function runAction(ctx, action, body, danger) {
   }
 }
 
-function renderCounts(data) {
-  const wrap = el("div", "flex flex-wrap gap-2 mb-3");
+function renderCounts(data, view, rerender) {
+  const wrap = el("div", "flex flex-wrap gap-2 mb-3 items-center");
   const counts = data.counts || {};
   for (const [key, label] of CATEGORIES.map(([k, l]) => [k, l])) {
     const n = counts[key] || 0;
     if (!n && key !== "perfect") continue;
-    const chip = el(
-      "span",
-      `px-2 py-1 rounded text-xs font-medium ${CHIP[key]}`,
+    const active = view.category === key;
+    const chip = btn(
       `${label}: ${n}`,
+      `px-2 py-1 rounded text-xs font-medium ${CHIP[key]} ${
+        active ? "ring-2 ring-slate-500 dark:ring-slate-300" : ""
+      }`,
+      () => {
+        view.category = active ? null : key; // toggle filter
+        rerender();
+      },
     );
+    chip.title = active ? "click to clear filter" : `filter to ${label}`;
     wrap.appendChild(chip);
   }
   const src = el(
@@ -140,6 +147,79 @@ function renderCounts(data) {
   );
   wrap.appendChild(src);
   return wrap;
+}
+
+function renderControls(data, view, rerender) {
+  const bar = el("div", "flex flex-wrap gap-2 mb-3 items-center");
+  const search = el(
+    "input",
+    "px-2 py-1 rounded border border-slate-300 dark:border-slate-600 bg-transparent text-sm w-56",
+  );
+  search.type = "search";
+  search.placeholder = "search name / id…";
+  search.value = view.search;
+  search.dataset.discoverySearch = "1";
+  search.addEventListener("input", () => {
+    view.search = search.value;
+    rerender();
+  });
+  bar.appendChild(search);
+
+  const sort = el(
+    "select",
+    "px-2 py-1 rounded border border-slate-300 dark:border-slate-600 bg-transparent text-sm",
+  );
+  for (const [val, lbl] of [["category", "sort: status"], ["name", "sort: name"], ["id", "sort: id"]]) {
+    const o = el("option", null, lbl);
+    o.value = val;
+    if (view.sort === val) o.selected = true;
+    sort.appendChild(o);
+  }
+  sort.addEventListener("change", () => {
+    view.sort = sort.value;
+    rerender();
+  });
+  bar.appendChild(sort);
+
+  if (view.category || view.search) {
+    bar.appendChild(
+      btn("clear filters", BTN_GHOST, () => {
+        view.category = null;
+        view.search = "";
+        rerender();
+      }),
+    );
+  }
+  return bar;
+}
+
+// Order used when sorting by status (worst first, so problems float up).
+const CAT_ORDER = [
+  "mismatched_payload", "partially_missing", "pure_missing",
+  "unexpected_topics", "orphans", "no_dp_config", "perfect",
+];
+
+function applyView(devices, view) {
+  let out = devices;
+  if (view.category) out = out.filter((d) => d.category === view.category);
+  if (view.search) {
+    const q = view.search.toLowerCase();
+    out = out.filter(
+      (d) =>
+        String(d.name || "").toLowerCase().includes(q) ||
+        String(d.id || "").toLowerCase().includes(q),
+    );
+  }
+  const by = view.sort;
+  const catRank = (c) => {
+    const i = CAT_ORDER.indexOf(c);
+    return i < 0 ? CAT_ORDER.length : i;
+  };
+  return [...out].sort((a, b) => {
+    if (by === "name") return String(a.name).localeCompare(String(b.name));
+    if (by === "id") return String(a.id).localeCompare(String(b.id));
+    return catRank(a.category) - catRank(b.category) || String(a.id).localeCompare(String(b.id));
+  });
 }
 
 function renderToolbar(ctx, data) {
@@ -168,19 +248,63 @@ function renderToolbar(ctx, data) {
   return bar;
 }
 
-function renderGrid(ctx, data) {
-  const devices = data.devices || [];
-  if (!devices.length) {
+function renderDetailPanel(d) {
+  const wrap = el("div", "py-2 pl-2 text-xs space-y-2");
+  const det = d.detail || {};
+  if (det.mismatched?.length) {
+    for (const m of det.mismatched) {
+      const block = el("div");
+      block.appendChild(
+        el("div", "font-mono text-slate-500 dark:text-slate-400 mb-1", m.topic),
+      );
+      for (const f of m.fields || []) {
+        const row = el("div", "pl-3 mb-1");
+        row.appendChild(el("span", "font-medium", `${f.key}: `));
+        row.appendChild(
+          el("span", "text-rose-600 dark:text-rose-400 line-through", JSON.stringify(f.actual)),
+        );
+        row.appendChild(el("span", "text-slate-400", "  →  "));
+        row.appendChild(
+          el("span", "text-emerald-600 dark:text-emerald-400", JSON.stringify(f.expected)),
+        );
+        block.appendChild(row);
+      }
+      wrap.appendChild(block);
+    }
+  }
+  const topicList = (label, topics, cls) => {
+    if (!topics?.length) return;
+    const b = el("div");
+    b.appendChild(el("div", `font-medium ${cls}`, `${label} (${topics.length})`));
+    for (const t of topics) b.appendChild(el("div", "font-mono pl-3 text-slate-500", t));
+    wrap.appendChild(b);
+  };
+  topicList("missing", det.missing, "text-rose-600 dark:text-rose-400");
+  topicList("unexpected", det.unexpected, "text-purple-600 dark:text-purple-400");
+  return wrap;
+}
+
+function renderGrid(ctx, data, view, rerender) {
+  const all = data.devices || [];
+  const devices = applyView(all, view);
+  if (!all.length) {
     return el(
       "div",
       "text-sm text-slate-500 dark:text-slate-400 py-8 text-center",
       "No devices to show yet.",
     );
   }
+  if (!devices.length) {
+    return el(
+      "div",
+      "text-sm text-slate-500 dark:text-slate-400 py-8 text-center",
+      "No devices match the current filter.",
+    );
+  }
   const table = el("table", "w-full text-sm");
   const thead = el("thead", "text-left text-slate-500 dark:text-slate-400");
   const htr = el("tr");
-  for (const h of ["Status", "Device", "ID", "matched / expected", "diff", ""]) {
+  for (const h of ["", "Status", "Device", "ID", "matched / expected", "diff", ""]) {
     htr.appendChild(el("th", "py-1 pr-3 font-medium", h));
   }
   thead.appendChild(htr);
@@ -188,10 +312,25 @@ function renderGrid(ctx, data) {
 
   const tbody = el("tbody");
   for (const d of devices) {
+    const expandable = !!d.detail;
+    const isOpen = view.expanded.has(d.id);
     const tr = el(
       "tr",
-      "border-t border-slate-100 dark:border-slate-800 align-top",
+      "border-t border-slate-100 dark:border-slate-800 align-top" +
+        (expandable ? " cursor-pointer" : ""),
     );
+    // chevron / expand toggle
+    const caret = el("td", "py-1 pr-2 text-slate-400 select-none w-4", expandable ? (isOpen ? "▾" : "▸") : "");
+    tr.appendChild(caret);
+    if (expandable) {
+      tr.addEventListener("click", (ev) => {
+        if (ev.target.tagName === "BUTTON") return; // don't toggle when hitting an action
+        if (isOpen) view.expanded.delete(d.id);
+        else view.expanded.add(d.id);
+        rerender();
+      });
+    }
+
     const status = el("td", "py-1 pr-3");
     status.appendChild(
       el(
@@ -234,6 +373,15 @@ function renderGrid(ctx, data) {
       tr.appendChild(actions);
     }
     tbody.appendChild(tr);
+
+    if (expandable && isOpen) {
+      const dtr = el("tr", "bg-slate-50 dark:bg-slate-800/40");
+      const cell = el("td", "px-2");
+      cell.colSpan = 7;
+      cell.appendChild(renderDetailPanel(d));
+      dtr.appendChild(cell);
+      tbody.appendChild(dtr);
+    }
   }
   table.appendChild(tbody);
   return table;
@@ -261,7 +409,17 @@ export async function mount(rootEl, ctx) {
   container.appendChild(body);
   rootEl.appendChild(container);
 
-  function paint(data) {
+  // View state persists across re-renders (live pushes + filter/sort/expand).
+  const view = { search: "", category: null, sort: "category", expanded: new Set() };
+  let lastData = null;
+
+  function render() {
+    const data = lastData;
+    // Preserve search focus + caret across the full rebuild.
+    const prev = body.querySelector("input[data-discovery-search]");
+    const focused = prev && document.activeElement === prev;
+    const caret = prev ? prev.selectionStart : null;
+
     body.innerHTML = "";
     if (!data) {
       body.appendChild(
@@ -269,16 +427,35 @@ export async function mount(rootEl, ctx) {
       );
       return;
     }
-    body.appendChild(renderCounts(data));
+    body.appendChild(renderCounts(data, view, render));
+    body.appendChild(renderControls(data, view, render));
     body.appendChild(renderToolbar(ctx, data));
-    body.appendChild(renderGrid(ctx, data));
+    body.appendChild(renderGrid(ctx, data, view, render));
     const errs = renderErrors(data);
     if (errs) body.appendChild(errs);
+
+    if (focused) {
+      const next = body.querySelector("input[data-discovery-search]");
+      if (next) {
+        next.focus();
+        if (caret != null) next.setSelectionRange(caret, caret);
+      }
+    }
+  }
+
+  function paint(data) {
+    if (data) {
+      lastData = data;
+      // Drop expansion state for ids no longer present.
+      const ids = new Set((data.devices || []).map((d) => d.id));
+      for (const id of [...view.expanded]) if (!ids.has(id)) view.expanded.delete(id);
+    }
+    render();
   }
 
   // Seed from the WS snapshot if it already carries our namespace, else fetch.
   const snap = ctx.getState && ctx.getState();
-  let initial = snap && snap.plugins && snap.plugins.discovery;
+  const initial = snap && snap.plugins && snap.plugins.discovery;
   paint(initial || null);
   if (!initial) {
     try {

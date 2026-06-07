@@ -3,6 +3,8 @@ import json
 import fnmatch
 from typing import Dict, List
 
+from ..core.detail import topic_field_diffs
+
 PROG = "rustuya-ha"
 
 # One-line meaning per -c/--category alias (single source of truth, also used in --help).
@@ -123,10 +125,9 @@ def print_mismatch_details(results: Dict, pattern: str):
     for d in matched_devices:
         print(f"\n📍 {d['name']} ({d['id']})")
         for m in d['mismatched']:
-            a, e = m['actual'], m['expected']
-            diff_keys = sorted(k for k in set(a) | set(e) if a.get(k) != e.get(k))
-            print(f"  {m['topic']}  ({len(diff_keys)} field(s) differ)")
-            for k in diff_keys:
-                print(f"    [{k}]")
-                print(f"      actual:   {a.get(k)}")
-                print(f"      expected: {e.get(k)}")
+            fields = topic_field_diffs(m['actual'], m['expected'])
+            print(f"  {m['topic']}  ({len(fields)} field(s) differ)")
+            for f in fields:
+                print(f"    [{f['key']}]")
+                print(f"      actual:   {f['actual']}")
+                print(f"      expected: {f['expected']}")
