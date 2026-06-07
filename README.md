@@ -10,9 +10,14 @@ publishes the corresponding retained `homeassistant/.../config` topics.
 ## Install
 
 ```bash
-pip install -e .          # from a checkout
+pip install --pre rustuya-homeassistant   # from PyPI (pre-release only for now)
+pip install -e .                           # or from a checkout
 rustuya-ha --help
 ```
+
+> Only a `0.0.1rc1` pre-release is published so far, so `--pre` is required
+> (a plain `pip install rustuya-homeassistant` finds nothing until the first
+> stable `0.1.0` release).
 
 `python -m rustuya_ha` works as well.
 
