@@ -46,13 +46,13 @@ largely done; the remaining work is the plumbing into the manager + the UI.
 Each milestone is an independently shippable slice. **Decision gate after M2** —
 validate the whole pipeline before investing in write-actions and polish.
 
-> **Status — 2026-06-07.** M0 ✅ and M1 ✅ are done and verified; the manager
-> already ships the generic plugin host. The remaining critical path is on the
-> rustuya-ha side: **M1.5 (core purification) → M2 (read-only discovery plugin,
-> the decision gate)**, then M3+. The only outstanding manager-side work is the
-> small **M-host+** publish primitive (needed for M3) and the **M-host++**
-> frontend e2e hardening (optional). Milestone numbers/anchors below are pinned
-> to verified current code.
+> **Status — 2026-06-08.** M0 ✅, M1 ✅, M1.5 ✅, **M-host+ ✅, and M2 ✅** are
+> done and verified — **the decision gate is passed**: with both packages
+> installed the manager grows a live, read-only "HA Discovery" tab driven entirely
+> through the host-agnostic plugin contract. The contract proved sufficient, so
+> **M3 (write actions) is unblocked** and is the next critical-path step. Remaining
+> manager-side work is only the optional **M-host++** frontend e2e hardening.
+> Milestone numbers/anchors below are pinned to verified current code.
 
 ### M0 — Publish `rustuya-ha` to PyPI  *(prereq, ~0.5d)*  ✅ DONE
 The plugin ships inside the rustuya-ha package, so it must be pip-installable.
@@ -91,10 +91,16 @@ Keep the plugin importing only the pure engine, not the paho CLI shell.
 - **Done:** the plugin depends only on `rustuya_ha.core`; `cli/` remains the
   paho-only headless shell. Golden + existing tests pass unchanged.
 
-### M2 — Discovery plugin, read-only MVP  *(rustuya-ha, ~1.5–2d)*  ← decision gate
+### M2 — Discovery plugin, read-only MVP  *(rustuya-ha)*  ✅ DONE & VERIFIED  ← decision gate
 The smallest end-to-end proof that the pipeline works. New module
 `rustuya_ha/manager_plugin/` + the `[manager]` extra + the `rustuya_manager.plugins`
-entry point.
+entry point. **Shipped & verified end-to-end** (manager venv: rustuya-ha wheel
+installed → entry point auto-discovered → "HA Discovery" tab in `/api/plugins`
+manifest → static `index.js` served → `/api/discovery/status` categorizes → live
+namespace push: feeding the generator's own retained configs back through the
+bridge tap categorizes all fixture devices as `perfect`). The contract
+(`ctx.devices()` + `ctx.bridge_config()` + the 4 contribution surfaces) is proven
+sufficient for read-only. Decision gate passed → M3 (write) is unblocked.
 - `register(ctx)`: `add_mqtt_subscription("homeassistant/#", handler)` (retained
   discovery), `add_api_router` (`GET /api/discovery/status`),
   `state_namespace("discovery")`, `add_page("discovery", "HA Discovery", static_dir=…)`.
@@ -104,24 +110,29 @@ entry point.
   `function` / `category` / `product_id`) — near-identity. Bridge config: build
   `BridgeConfig.from_bridge_config_topic(payload)` from the retained
   `{root}/bridge/config`. Run the verifier; push results into the namespace.
-- **⚠️ Open contract point:** the plugin backend needs read access to devices
+- **✅ Resolved contract point:** the plugin backend needs read access to devices
   (`raw_data` is server-side only — it is deliberately omitted from the WS
-  snapshot). Today `ctx` exposes only `bridge_client` + the namespace. Resolve at
-  M2 start: add a small read-only device accessor to `ctx` (manager-side change,
-  HA-agnostic) — pairs naturally with M-host+.
+  snapshot) and to the raw bridge config (the manager's `BridgeTemplates` drops
+  `mqtt_retain`, which the HA scheme needs). M-host+ added two read-only `ctx`
+  accessors — `ctx.devices()` → `{id: raw_data}` and `ctx.bridge_config()` → the
+  raw `{root}/bridge/config` dict — both HA-agnostic, zero-plugin no-regression.
 - **Frontend:** `static/index.js` `mount()` subscribes via `ctx.onState` to
   `snapshot.plugins.discovery`; renders the status grid (view-only, no buttons).
 - **Done:** with manager + rustuya-ha installed, the HA tab shows a live per-device
   discovery status grid. **← decision gate: confirm the contract feels right.**
 
-### M-host+ — Generic retained publish primitive  *(rustuya-manager, ~0.5d; before M3)*
-M3 prerequisite. `ctx.bridge_client` today only exposes `publish_command` (the
-bridge command topic). The discovery plugin must write/clear `homeassistant/.../config`
-retained topics.
-- Add a public `BridgeClient.publish_raw(topic, payload, *, retain, qos=1)` (or
-  expose `ctx.publish(...)`) so plugins don't reach into privates. Bundle the M2
-  device-read accessor here.
-- **Done:** behaviour unchanged for the manager; one unit test; HA-agnostic.
+### M-host+ — Read accessors + generic retained publish  *(rustuya-manager)*  ✅ DONE
+Done alongside M2. `ctx.bridge_client` previously only exposed `publish_command`
+(the bridge command topic); the discovery plugin must also read devices/config and
+(for M3) write/clear `homeassistant/.../config` retained topics. Added to the
+HA-agnostic plugin host:
+- `ctx.devices()` → read-only `{id: raw_data}` snapshot of cloud devices.
+- `ctx.bridge_config()` → read-only copy of the raw `{root}/bridge/config` dict
+  (now retained on `State.bridge_config_raw`, stored without a redundant version bump).
+- `BridgeClient.publish_raw(topic, payload, *, retain, qos=1)` — generic retained
+  publish for topics outside the bridge namespace (ready for M3; not yet used).
+- **Done:** behaviour unchanged for a plugin-less manager (zero-plugin no-regression
+  intact); +6 unit tests (manager suite 219 pass); HA-agnostic.
 
 ### M3 — Write actions: publish / clear / restore  *(rustuya-ha, ~1.5–2d)*
 - `/api/discovery/{publish,clear,restore}`; publish via the M-host+ primitive

@@ -30,6 +30,17 @@ dependencies = [
     "paho-mqtt>=2.0",
 ]
 
+[project.optional-dependencies]
+# Installs the host this plugin plugs into. With `pip install rustuya-homeassistant[manager]`
+# the entry-point below is discovered by rustuya-manager and an "HA Discovery" tab appears.
+# The dependency arrow is one-way: rustuya-ha -> rustuya-manager, never the reverse.
+manager = [
+    "rustuya-manager>=0.1.0rc29",
+]
+
+[project.entry-points."rustuya_manager.plugins"]
+discovery = "rustuya_ha.manager_plugin:register"
+
 [project.urls]
 Homepage = "https://github.com/3735943886/rustuya-homeassistant"
 Repository = "https://github.com/3735943886/rustuya-homeassistant"
