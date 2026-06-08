@@ -249,7 +249,10 @@ function renderToolbar(ctx, data) {
 }
 
 function renderDetailPanel(d) {
-  const wrap = el("div", "py-2 pl-2 text-xs space-y-2");
+  const wrap = el(
+    "div",
+    "mt-2 pt-2 border-t border-slate-200/70 dark:border-slate-700/70 text-xs space-y-2",
+  );
   const det = d.detail || {};
   if (det.mismatched?.length) {
     for (const m of det.mismatched) {
@@ -284,23 +287,110 @@ function renderDetailPanel(d) {
   return wrap;
 }
 
-// A data cell that reflows for mobile: a normal <td> on `sm`+ screens, but a
-// labelled flex row on narrow screens, where the table collapses into per-
-// device cards and the <thead> is hidden (so each cell carries its own label).
-// `content` may be a string or a pre-built Node.
-function cell(label, content) {
-  const td = el(
-    "td",
-    "block sm:table-cell py-1 sm:pr-3 max-sm:flex max-sm:items-baseline max-sm:justify-between max-sm:gap-3",
+// Per-category card colors, mirroring rustuya-manager's device-card grammar:
+// a left-edge stripe carries the category (so it never needs its own column)
+// and a faint body wash echoes it. The top counts chips act as the legend.
+const CAT_STYLE = {
+  perfect:            { edge: "border-l-emerald-400 dark:border-l-emerald-500", wash: "bg-white dark:bg-slate-800" },
+  mismatched_payload: { edge: "border-l-amber-400 dark:border-l-amber-500",     wash: "bg-amber-50 dark:bg-amber-900/30" },
+  partially_missing:  { edge: "border-l-yellow-400 dark:border-l-yellow-500",   wash: "bg-yellow-50 dark:bg-yellow-900/30" },
+  pure_missing:       { edge: "border-l-sky-400 dark:border-l-sky-500",         wash: "bg-sky-50 dark:bg-sky-900/30" },
+  unexpected_topics:  { edge: "border-l-purple-400 dark:border-l-purple-500",   wash: "bg-purple-50 dark:bg-purple-900/30" },
+  no_dp_config:       { edge: "border-l-slate-300 dark:border-l-slate-500",     wash: "bg-white dark:bg-slate-800" },
+  orphans:            { edge: "border-l-rose-400 dark:border-l-rose-500",       wash: "bg-rose-50 dark:bg-rose-900/30" },
+};
+const CAT_FALLBACK = { edge: "border-l-slate-200 dark:border-l-slate-600", wash: "bg-white dark:bg-slate-800" };
+
+// Small square icon button matching the manager's iconButton so the HA tab's
+// actions read the same as the host's device cards. stopPropagation keeps a
+// click from also toggling the card's expand.
+function iconBtn(glyph, title, onClick, variant) {
+  const styles = {
+    default: "border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-500 dark:text-slate-300",
+    danger:  "border-rose-200 dark:border-rose-800 bg-white dark:bg-slate-700 hover:bg-rose-50 dark:hover:bg-rose-900/40 text-rose-600 dark:text-rose-400",
+  }[variant || "default"];
+  const b = el("button", `w-5 h-5 inline-flex items-center justify-center rounded border text-xs leading-none ${styles}`, glyph);
+  b.type = "button";
+  b.title = title;
+  b.addEventListener("click", (ev) => { ev.stopPropagation(); onClick(); });
+  return b;
+}
+
+// One device, as a manager-style card: name on top, id beneath it, the
+// category as the left stripe + wash, a compact match metric and +/− actions
+// in the right cluster, and the diff detail in the expanded body.
+function deviceCard(ctx, d, view, rerender) {
+  const cat = CAT_STYLE[d.category] || CAT_FALLBACK;
+  const expandable = !!d.detail;
+  const isOrphan = d.category === "orphans";
+  const toggle = () => {
+    if (view.expanded.has(d.id)) view.expanded.delete(d.id);
+    else view.expanded.add(d.id);
+    rerender();
+  };
+  const isOpen = view.expanded.has(d.id);
+
+  const card = el(
+    "div",
+    `${cat.wash} rounded-lg border border-slate-200 dark:border-slate-700 ` +
+      `border-l-4 dark:border-l-[6px] ${cat.edge} p-3 mb-2` +
+      (expandable ? " cursor-pointer" : ""),
   );
-  if (label) {
-    td.appendChild(
-      el("span", "sm:hidden shrink-0 text-slate-400 dark:text-slate-500 font-medium", label),
-    );
+  card.title = LABEL[d.category] || d.category; // category lives on the stripe; hover to read it
+  if (expandable) {
+    card.addEventListener("click", (ev) => {
+      if (ev.target.closest("button, input, a")) return;
+      toggle();
+    });
   }
-  if (content instanceof Node) td.appendChild(content);
-  else td.appendChild(el("span", "max-sm:text-right max-sm:break-all", content == null ? "" : String(content)));
-  return td;
+
+  // ── header row 1: name + right cluster (metric · actions · caret) ──
+  const top = el("div", "flex items-center gap-2 min-w-0");
+  top.appendChild(
+    el("span", "font-medium text-sm text-slate-900 dark:text-slate-100 truncate min-w-0", d.name || d.id || ""),
+  );
+  const right = el("span", "ml-auto flex items-center gap-1.5 shrink-0");
+  if (isOrphan) {
+    const n = (d.topics || []).length;
+    right.appendChild(el("span", "text-[11px] font-mono text-slate-500 dark:text-slate-400", `${n} topic${n === 1 ? "" : "s"}`));
+  } else {
+    const ok = (d.matched ?? 0) === (d.expected ?? 0);
+    const metric = el(
+      "span",
+      `text-[11px] font-mono ${ok ? "text-emerald-600 dark:text-emerald-400" : "text-slate-500 dark:text-slate-400"}`,
+      `${d.matched ?? 0}/${d.expected ?? 0}`,
+    );
+    metric.title = "matched / expected entities";
+    right.appendChild(metric);
+    right.appendChild(iconBtn("+", "Publish", () => runAction(ctx, "publish", { ids: [d.id] }, false)));
+    right.appendChild(iconBtn("−", "Clear", () => runAction(ctx, "clear", { ids: [d.id] }, true), "danger"));
+  }
+  if (expandable) {
+    right.appendChild(iconBtn(isOpen ? "▾" : "▸", isOpen ? "Collapse" : "Expand", toggle));
+  }
+  top.appendChild(right);
+  card.appendChild(top);
+
+  // ── header row 2: id (under name) + diff summary on the right ──
+  const bottom = el("div", "flex items-center gap-2 mt-0.5 min-w-0");
+  bottom.appendChild(
+    d.id && d.id !== d.name
+      ? el("span", "font-mono text-[11px] text-slate-400 dark:text-slate-500 truncate min-w-0", d.id)
+      : el("span", "min-w-0"),
+  );
+  const parts = [];
+  if (d.mismatched) parts.push(["~" + d.mismatched, "text-amber-600 dark:text-amber-400"]);
+  if (d.missing) parts.push(["-" + d.missing, "text-rose-600 dark:text-rose-400"]);
+  if (d.unexpected) parts.push(["+" + d.unexpected, "text-purple-600 dark:text-purple-400"]);
+  if (parts.length) {
+    const diff = el("span", "ml-auto flex items-center gap-1.5 shrink-0 text-[10px] font-mono");
+    for (const [t, c] of parts) diff.appendChild(el("span", c, t));
+    bottom.appendChild(diff);
+  }
+  card.appendChild(bottom);
+
+  if (expandable && isOpen) card.appendChild(renderDetailPanel(d));
+  return card;
 }
 
 function renderGrid(ctx, data, view, rerender) {
@@ -320,110 +410,9 @@ function renderGrid(ctx, data, view, rerender) {
       "No devices match the current filter.",
     );
   }
-  // Below `sm` the table reflows into per-device cards (each <tr> a card, each
-  // <td> a labelled row); at `sm`+ it's a normal table that can scroll if the
-  // 7 columns ever exceed the panel width.
-  const table = el("table", "w-full text-sm max-sm:block");
-  const thead = el("thead", "hidden sm:table-header-group text-left text-slate-500 dark:text-slate-400");
-  const htr = el("tr");
-  for (const h of ["", "Status", "Device", "ID", "matched / expected", "diff", ""]) {
-    htr.appendChild(el("th", "py-1 pr-3 font-medium", h));
-  }
-  thead.appendChild(htr);
-  table.appendChild(thead);
-
-  const tbody = el("tbody", "max-sm:block");
-  for (const d of devices) {
-    const expandable = !!d.detail;
-    const isOpen = view.expanded.has(d.id);
-    const tr = el(
-      "tr",
-      "align-top block sm:table-row sm:border-t border-slate-100 dark:border-slate-800 " +
-        "max-sm:rounded-lg max-sm:border max-sm:border-slate-200 max-sm:dark:border-slate-700 " +
-        "max-sm:bg-white max-sm:dark:bg-slate-800/60 max-sm:p-3 max-sm:mb-2" +
-        (expandable ? " cursor-pointer" : ""),
-    );
-    if (expandable) {
-      tr.addEventListener("click", (ev) => {
-        if (ev.target.tagName === "BUTTON") return; // don't toggle when hitting an action
-        if (isOpen) view.expanded.delete(d.id);
-        else view.expanded.add(d.id);
-        rerender();
-      });
-    }
-
-    // chevron / expand toggle — its own column on desktop; on mobile it rides
-    // alongside the status chip (the caret column is hidden there).
-    const caret = el(
-      "td",
-      "hidden sm:table-cell py-1 pr-2 text-slate-400 select-none w-4",
-      expandable ? (isOpen ? "▾" : "▸") : "",
-    );
-    tr.appendChild(caret);
-
-    const status = el(
-      "td",
-      "block sm:table-cell py-1 sm:pr-3 max-sm:flex max-sm:items-center max-sm:justify-between max-sm:mb-1",
-    );
-    status.appendChild(
-      el(
-        "span",
-        `px-2 py-0.5 rounded text-xs font-medium ${CHIP[d.category] || COLOR.slate}`,
-        LABEL[d.category] || d.category,
-      ),
-    );
-    if (expandable) {
-      status.appendChild(el("span", "sm:hidden text-slate-400 select-none", isOpen ? "▾" : "▸"));
-    }
-    tr.appendChild(status);
-    tr.appendChild(cell("Device", d.name || ""));
-    tr.appendChild(
-      cell(
-        "ID",
-        el("span", "font-mono text-xs text-slate-500 dark:text-slate-400 max-sm:text-right max-sm:break-all", d.id || ""),
-      ),
-    );
-    if (d.category === "orphans") {
-      tr.appendChild(cell("matched / expected", "—"));
-      tr.appendChild(
-        cell("diff", el("span", "text-xs text-slate-500 max-sm:text-right max-sm:break-all", (d.topics || []).join(", "))),
-      );
-      tr.appendChild(el("td", "hidden sm:table-cell py-1 pr-3"));
-    } else {
-      tr.appendChild(cell("matched / expected", `${d.matched ?? 0} / ${d.expected ?? 0}`));
-      const parts = [];
-      if (d.mismatched) parts.push(`~${d.mismatched}`);
-      if (d.missing) parts.push(`-${d.missing}`);
-      if (d.unexpected) parts.push(`+${d.unexpected}`);
-      tr.appendChild(
-        cell("diff", el("span", "text-xs text-slate-500 max-sm:text-right max-sm:break-all", parts.join("  ") || "—")),
-      );
-      const actions = el("td", "block sm:table-cell py-1 sm:pr-3 max-sm:mt-2 whitespace-nowrap");
-      const sp = el("span", "flex gap-1");
-      sp.appendChild(
-        btn("Publish", BTN_GHOST, () => runAction(ctx, "publish", { ids: [d.id] }, false)),
-      );
-      sp.appendChild(
-        btn("Clear", BTN_GHOST, () => runAction(ctx, "clear", { ids: [d.id] }, true)),
-      );
-      actions.appendChild(sp);
-      tr.appendChild(actions);
-    }
-    tbody.appendChild(tr);
-
-    if (expandable && isOpen) {
-      const dtr = el("tr", "block sm:table-row bg-slate-50 dark:bg-slate-800/40 max-sm:rounded-lg max-sm:-mt-1 max-sm:mb-2");
-      const dcell = el("td", "block sm:table-cell px-2 max-sm:px-3 max-sm:pb-2");
-      dcell.colSpan = 7;
-      dcell.appendChild(renderDetailPanel(d));
-      dtr.appendChild(dcell);
-      tbody.appendChild(dtr);
-    }
-  }
-  table.appendChild(tbody);
-  const scroller = el("div", "overflow-x-auto");
-  scroller.appendChild(table);
-  return scroller;
+  const list = el("div"); // cards carry their own mb-2
+  for (const d of devices) list.appendChild(deviceCard(ctx, d, view, rerender));
+  return list;
 }
 
 function renderErrors(data) {
