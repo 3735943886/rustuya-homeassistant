@@ -186,16 +186,22 @@ function renderControls(data, view, rerender) {
   });
   bar.appendChild(search);
 
+  // Manager-style: the "sort by" label is folded into the select via an
+  // <optgroup> header (shown when open), so no separate label row is needed.
   const sort = el(
     "select",
-    "px-2 py-1 rounded border border-slate-300 dark:border-slate-600 bg-transparent text-sm",
+    "text-xs px-2 py-1 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100",
   );
-  for (const [val, lbl] of [["category", "sort: status"], ["name", "sort: name"], ["id", "sort: id"]]) {
+  sort.title = "Sort devices";
+  const og = el("optgroup");
+  og.label = "sort by";
+  for (const [val, lbl] of [["category", "category"], ["name", "name"], ["id", "id"]]) {
     const o = el("option", null, lbl);
     o.value = val;
     if (view.sort === val) o.selected = true;
-    sort.appendChild(o);
+    og.appendChild(o);
   }
+  sort.appendChild(og);
   sort.addEventListener("change", () => {
     view.sort = sort.value;
     rerender();
