@@ -7,7 +7,9 @@ dist/
 .rustuya-ha-backups/
 *.json
 !custom_converters.json
-# Test fixtures/golden are synthetic (no private device data) — always tracked,
-# so new ones aren't silently dropped by the *.json rule above.
+# Test fixtures are synthetic (no private device data) — always tracked, so new
+# ones aren't silently dropped by the *.json rule above.
 !tests/fixtures/*.json
-!tests/golden/*.json
+# Golden is matched per-file (the golden/ dir may also hold large, real-device
+# snapshots generated ad hoc — those must stay ignored / never committed).
+!tests/golden/synthetic_snapshots.json
