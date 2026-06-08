@@ -69,6 +69,7 @@ def snapshot_file(backup_dir: str, src: str, prefix: str = "converters") -> Opti
         dst = d / f"{prefix}-{stamp}-{n}.json"
         n += 1
     dst.write_text(s.read_text(encoding="utf-8"), encoding="utf-8")
+    _rotate(d, prefix)  # bound growth like save() does (else converters backups pile up)
     return str(dst)
 
 
@@ -79,11 +80,14 @@ def load(path: str) -> Dict[str, dict]:
     return data["topics"] if isinstance(data, dict) and "topics" in data else data
 
 
-def listing(backup_dir: str) -> List[Path]:
+def listing(backup_dir: str, limit: Optional[int] = None) -> List[Path]:
+    """All backup files, newest first. ``limit`` caps the result (the full set
+    can grow with manually-dropped files even though auto/converters rotate)."""
     d = Path(backup_dir)
     if not d.exists():
         return []
-    return sorted(d.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    files = sorted(d.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    return files[:limit] if limit is not None else files
 
 
 def latest(backup_dir: str) -> Optional[str]:

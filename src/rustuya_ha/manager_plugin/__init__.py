@@ -292,8 +292,15 @@ class DiscoveryPlugin:
         result["executed"] = True
         return result
 
-    def list_backups(self) -> List[Dict[str, str]]:
-        return [{"name": p.name, "path": str(p)} for p in backup.listing(self.backup_dir)]
+    def list_backups(self, limit: int = 50) -> Dict[str, Any]:
+        """Newest `limit` backups + the full count, so the UI stays bounded even
+        if the dir grows (manual drops; auto/converters self-rotate)."""
+        all_files = backup.listing(self.backup_dir)
+        shown = all_files[:limit]
+        return {
+            "backups": [{"name": p.name, "path": str(p)} for p in shown],
+            "total": len(all_files),
+        }
 
     # ── custom converters editing (M5) ───────────────────────────────────
     # Edits the same per-product_id override file the generator/CLI resolve
@@ -416,7 +423,7 @@ def register(ctx: Any) -> None:
 
     @router.get("/api/discovery/backups")
     async def discovery_backups() -> Dict[str, Any]:
-        return {"backups": plugin.list_backups()}
+        return plugin.list_backups()
 
     # publish/clear take {ids: [...], dry_run: bool}; restore takes {file?, dry_run}.
     # A RuntimeError from publish_raw means the broker is down → surface as 503 so

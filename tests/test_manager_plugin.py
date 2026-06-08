@@ -7,6 +7,7 @@ bridge_config(), add_mqtt_subscription, state_namespace, add_api_router, add_pag
 """
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -350,10 +351,28 @@ def test_list_backups(tmp_path):
     ctx = FakeCtx(devices=DEVICES, bridge_cfg=LEGACY_CFG)
     p = DiscoveryPlugin(ctx)
     p.backup_dir = str(tmp_path)
-    assert p.list_backups() == []
+    assert p.list_backups() == {"backups": [], "total": 0}
     backup.save(str(tmp_path), {"homeassistant/x/config": {"payload": {"a": 1}}}, prefix="auto")
-    names = [b["name"] for b in p.list_backups()]
+    res = p.list_backups()
+    assert res["total"] == 1
+    names = [b["name"] for b in res["backups"]]
     assert len(names) == 1 and names[0].startswith("auto-")
+
+
+def test_list_backups_caps_to_limit(tmp_path):
+    """The UI listing is bounded: with more files than the limit, only the
+    newest `limit` are returned but `total` reports the full count."""
+    p = DiscoveryPlugin(FakeCtx(devices=DEVICES, bridge_cfg=LEGACY_CFG))
+    p.backup_dir = str(tmp_path)
+    d = Path(tmp_path)
+    for i in range(8):
+        # Distinct mtimes so newest-first ordering is well-defined.
+        f = d / f"manual-{i:02d}.json"
+        f.write_text('{"topics": {}}', encoding="utf-8")
+        os.utime(f, (1000 + i, 1000 + i))
+    res = p.list_backups(limit=3)
+    assert res["total"] == 8
+    assert [b["name"] for b in res["backups"]] == ["manual-07.json", "manual-06.json", "manual-05.json"]
 
 
 # ── custom converters editing (M5) ───────────────────────────────────────

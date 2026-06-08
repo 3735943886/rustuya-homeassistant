@@ -438,9 +438,11 @@ function openApplyModal(ctx, data, opts) {
 // `.rustuya-ha-backups/`; drop a file there to have it appear in the list.
 async function openRestoreModal(ctx) {
   let list = [];
+  let total = 0;
   try {
     const r = await ctx.api("/api/discovery/backups");
     list = r.backups || [];
+    total = r.total ?? list.length;
   } catch (e) {
     ctx.toast && ctx.toast(`restore: ${e.message}`, "error");
     return;
@@ -491,6 +493,11 @@ async function openRestoreModal(ctx) {
 
   function renderList() {
     bodyEl.innerHTML = "";
+    if (total > list.length) {
+      bodyEl.appendChild(
+        el("div", "text-[11px] text-slate-400 dark:text-slate-500 mb-2", `Showing newest ${list.length} of ${total} backups.`),
+      );
+    }
     const ul = el("div", "divide-y divide-slate-100 dark:divide-slate-700 border border-slate-200 dark:border-slate-700 rounded");
     list.forEach((bk, i) => {
       const row = el("label", "px-3 py-2 flex items-center gap-2 text-sm cursor-pointer");

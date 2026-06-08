@@ -1,5 +1,6 @@
 """Backup/restore: save/load roundtrip + the pure restore_plan revert logic."""
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -7,6 +8,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from rustuya_ha.cli import backup  # noqa: E402
+from rustuya_ha.core import backup as core_backup  # noqa: E402  (snapshot_file not re-exported by cli)
 
 
 def _mqtt(topics):
@@ -39,6 +41,26 @@ def test_rotate_keeps_recent(tmp_path):
         backup.save(str(tmp_path), _mqtt({f"t{i}/config": {"i": i}}), prefix="auto")
     autos = list(Path(tmp_path).glob("auto-*.json"))
     assert len(autos) == backup.KEEP
+
+
+def test_listing_limit(tmp_path):
+    for i in range(5):
+        f = Path(tmp_path) / f"manual-{i}.json"
+        f.write_text('{"topics": {}}', encoding="utf-8")
+        os.utime(f, (1000 + i, 1000 + i))  # distinct mtimes -> deterministic order
+    assert len(backup.listing(str(tmp_path))) == 5  # no limit -> all
+    capped = backup.listing(str(tmp_path), limit=2)
+    assert [p.name for p in capped] == ["manual-4.json", "manual-3.json"]  # newest first
+
+
+def test_snapshot_file_rotates(tmp_path):
+    """converters snapshots must rotate like save() does, else they grow forever."""
+    src = Path(tmp_path) / "custom_converters.json"
+    src.write_text("{}", encoding="utf-8")
+    for _ in range(core_backup.KEEP + 3):
+        core_backup.snapshot_file(str(tmp_path), str(src), prefix="converters")
+    snaps = list(Path(tmp_path).glob("converters-*.json"))
+    assert len(snaps) == core_backup.KEEP
 
 
 def test_restore_plan_sets_snapshot_and_clears_additions():
