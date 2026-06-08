@@ -63,6 +63,13 @@ const CAN_CLEAR = new Set([
   "unexpected_topics",
 ]);
 
+// Themed <select>. `dark:[color-scheme:dark]` makes the browser paint the
+// native dropdown popup (option list) with the dark palette in dark mode —
+// without it the popup stays light and is unreadable on a dark page.
+const SELECT_CLS =
+  "text-xs px-2 py-1 rounded border border-slate-300 dark:border-slate-600 " +
+  "bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 dark:[color-scheme:dark]";
+
 function describePlan(action, plan) {
   if (action === "publish") {
     const pub = (plan.per_device || []).reduce((n, p) => n + (p.publish || 0), 0);
@@ -142,9 +149,10 @@ function filterPill(label, count, on, color, onClick) {
 
 // Manager-style category filter: multi-select colored tabs + an "all" pill that
 // toggles every category at once. Tabs with 0 fade so the eye lands on the
-// actionable ones. `view.filters` is the set of enabled category keys.
-function renderFilterTabs(data, view, rerender) {
-  const wrap = el("div", "flex flex-wrap gap-1 mb-3 text-xs");
+// actionable ones. `view.filters` is the set of enabled category keys. The bulk
+// actions (Publish / Restore) ride the right end of this same row.
+function renderFilterTabs(ctx, data, view, rerender) {
+  const wrap = el("div", "flex flex-wrap gap-1 mb-3 text-xs items-center");
   const counts = data.counts || {};
   const allOn = ALL_CAT_KEYS.every((k) => view.filters.has(k));
   const total = ALL_CAT_KEYS.reduce((n, k) => n + (counts[k] || 0), 0);
@@ -167,6 +175,23 @@ function renderFilterTabs(data, view, rerender) {
     pill.title = on ? `hide ${label}` : `show ${label}`;
     wrap.appendChild(pill);
   }
+
+  // Right-aligned bulk actions on the same row.
+  const devices = data.devices || [];
+  const syncIds = devices.filter((d) => NEEDS_SYNC.has(d.category)).map((d) => d.id);
+  const orphanTopics = devices.filter((d) => d.category === "orphans").flatMap((d) => d.topics || []);
+  const actionable = syncIds.length + orphanTopics.length;
+  const actions = el("span", "ml-auto flex items-center gap-1.5");
+  const pub = barBtn(
+    `Publish${actionable ? ` ${actionable}` : ""}`,
+    "sky",
+    "Review by category, then publish / clear orphans",
+    () => openApplyModal(ctx, data, { publish: true, clear: true }),
+  );
+  pub.disabled = actionable === 0;
+  actions.appendChild(pub);
+  actions.appendChild(barBtn("Restore", "slate", "Restore from a backup", () => openRestoreModal(ctx)));
+  wrap.appendChild(actions);
   return wrap;
 }
 
@@ -206,10 +231,7 @@ function renderControls(data, view, rerender) {
 
   // Manager-style: the "sort by" label is folded into the select via an
   // <optgroup> header (shown when open), so no separate label row is needed.
-  const sort = el(
-    "select",
-    "text-xs px-2 py-1 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100",
-  );
+  const sort = el("select", SELECT_CLS);
   sort.title = "Sort devices";
   const og = el("optgroup");
   og.label = "sort by";
@@ -599,41 +621,6 @@ async function openRestoreModal(ctx) {
   document.body.appendChild(overlay);
 }
 
-// Bulk-action bar: a single Publish (opens the grouped review modal — one
-// collapsible group per category plus orphans-to-clear) + Restore. The modal's
-// per-category select-all makes "publish just this category" one click, so the
-// old separate "Clear orphans"/"Apply all" buttons are gone. Carries the badge.
-function renderSyncBar(ctx, data, view) {
-  const devices = data.devices || [];
-  const syncIds = devices.filter((d) => NEEDS_SYNC.has(d.category)).map((d) => d.id);
-  const orphanTopics = devices.filter((d) => d.category === "orphans").flatMap((d) => d.topics || []);
-  const actionable = syncIds.length + orphanTopics.length;
-
-  const bar = el(
-    "div",
-    "flex flex-wrap items-center gap-1.5 bg-white dark:bg-slate-800 " +
-      "border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1.5 mb-3",
-  );
-  bar.appendChild(
-    el(
-      "span",
-      "text-[11px] text-slate-400 dark:text-slate-500 whitespace-nowrap mr-1",
-      `scheme: ${data.config_source || "?"} · retained: ${data.retained_topics ?? 0}`,
-    ),
-  );
-  const pub = barBtn(
-    `Publish${actionable ? ` ${actionable}` : ""}`,
-    "sky",
-    "Review by category, then publish / clear orphans",
-    () => openApplyModal(ctx, data, { publish: true, clear: true }),
-  );
-  pub.classList.add("ml-auto");
-  pub.disabled = actionable === 0;
-  bar.appendChild(pub);
-  bar.appendChild(barBtn("Restore", "slate", "Restore from a backup", () => openRestoreModal(ctx)));
-  return bar;
-}
-
 function renderDetailPanel(d) {
   const wrap = el(
     "div",
@@ -846,11 +833,17 @@ function jsonPretty(obj) {
   }
 }
 
+const ALL_CONV = "__all__"; // pseudo-selection: edit the whole converters file
+
 function selectProduct(view, pid) {
   const c = view.conv;
   c.selected = pid;
-  const existing = c.info && c.info.converters ? c.info.converters[pid] : null;
-  c.text = existing ? jsonPretty(existing) : jsonPretty({ model: "", dp_meta: {} });
+  if (pid === ALL_CONV) {
+    c.text = jsonPretty((c.info && c.info.converters) || {});
+  } else {
+    const existing = c.info && c.info.converters ? c.info.converters[pid] : null;
+    c.text = existing ? jsonPretty(existing) : jsonPretty({ model: "", dp_meta: {} });
+  }
   c.preview = null;
 }
 
@@ -862,10 +855,11 @@ async function loadConverters(ctx, view, rerender) {
     view.conv.info = info;
     view.conv.loaded = true;
     const pids = (info.products || []).map((p) => p.product_id);
-    const keep = view.conv.selected && pids.includes(view.conv.selected)
-      ? view.conv.selected
-      : pids[0];
-    if (keep) selectProduct(view, keep);
+    const keep =
+      view.conv.selected === ALL_CONV || (view.conv.selected && pids.includes(view.conv.selected))
+        ? view.conv.selected
+        : pids[0] || ALL_CONV;
+    selectProduct(view, keep);
   } catch (e) {
     ctx.toast && ctx.toast(`converters: ${e.message}`, "error");
   } finally {
@@ -883,6 +877,34 @@ function parseOverride(text) {
 async function convAction(ctx, view, rerender, kind) {
   const c = view.conv;
   if (!c.selected) return;
+  // All-mode: the textarea is the whole converters file; Save replaces it.
+  if (c.selected === ALL_CONV) {
+    if (kind !== "save") return; // preview/delete are per-product only
+    let mapping;
+    try {
+      mapping = JSON.parse(c.text.trim() || "{}");
+    } catch (e) {
+      ctx.toast && ctx.toast(`invalid JSON: ${e.message}`, "error");
+      return;
+    }
+    const ok = ctx.confirm
+      ? await ctx.confirm({
+          title: "converters — save all",
+          message: "Replace the entire converters file with this JSON?\nThis changes what Publish emits for every overridden product.",
+          okLabel: "save all",
+          danger: true,
+        })
+      : true;
+    if (!ok) return;
+    try {
+      const res = await ctx.api("/api/discovery/converters/save_all", { method: "POST", body: { converters: mapping } });
+      ctx.toast && ctx.toast(`converters saved (${res.count})${res.backup ? " · backup" : ""}`, "ok");
+      await loadConverters(ctx, view, rerender);
+    } catch (e) {
+      ctx.toast && ctx.toast(`save all: ${e.message}`, "error");
+    }
+    return;
+  }
   let override;
   try {
     override = kind === "delete" ? null : parseOverride(c.text);
@@ -962,15 +984,15 @@ function renderConverters(ctx, view, rerender) {
   }
   const info = c.info || { products: [], converters: {}, save_path: "" };
 
+  const isAll = c.selected === ALL_CONV;
+
   const row = el("div", "flex flex-wrap gap-2 items-center mb-2");
-  const sel = el(
-    "select",
-    "px-2 py-1 rounded border border-slate-300 dark:border-slate-600 bg-transparent text-sm",
-  );
-  if (!info.products.length) {
-    sel.appendChild(el("option", null, "(no product_ids in fleet)"));
-    sel.disabled = true;
-  }
+  const sel = el("select", SELECT_CLS);
+  // "All" lets you see/edit the whole converters file in one JSON blob.
+  const allOpt = el("option", null, "All (full JSON)");
+  allOpt.value = ALL_CONV;
+  if (isAll) allOpt.selected = true;
+  sel.appendChild(allOpt);
   for (const pr of info.products) {
     const o = el(
       "option",
@@ -990,25 +1012,30 @@ function renderConverters(ctx, view, rerender) {
 
   const ta = el(
     "textarea",
-    "w-full h-48 font-mono text-xs p-2 rounded border border-slate-300 dark:border-slate-600 bg-transparent",
+    "w-full h-48 font-mono text-xs p-2 rounded border border-slate-300 dark:border-slate-600 " +
+      "bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100",
   );
   ta.value = c.text;
   ta.dataset.keepFocus = "conv-text";
   ta.spellcheck = false;
-  ta.placeholder = '{"model": "...", "dp_meta": { "1": { ... } }}  — empty or "null" deletes';
+  ta.placeholder = isAll
+    ? '{"<product_id>": {"model": "...", "dp_meta": { ... }}, ...}  — the whole converters file'
+    : '{"model": "...", "dp_meta": { "1": { ... } }}  — empty or "null" deletes';
   ta.addEventListener("input", () => {
     c.text = ta.value;
   });
-  if (sel.disabled) ta.disabled = true;
   wrap.appendChild(ta);
 
   const acts = el("div", "flex flex-wrap gap-2 mt-2 items-center");
+  // Preview is per-product (regenerates that product's devices); not meaningful
+  // for the whole-file edit.
   const previewBtn = btn("Preview", BTN_GHOST, () => convAction(ctx, view, rerender, "preview"));
   const saveBtn = btn("Save", BTN_PRIMARY, () => convAction(ctx, view, rerender, "save"));
-  previewBtn.disabled = saveBtn.disabled = !c.selected;
+  previewBtn.disabled = isAll;
+  saveBtn.disabled = false;
   acts.appendChild(previewBtn);
   acts.appendChild(saveBtn);
-  if (c.selected && info.converters && c.selected in info.converters) {
+  if (!isAll && c.selected && info.converters && c.selected in info.converters) {
     acts.appendChild(btn("Delete override", BTN_DANGER, () => convAction(ctx, view, rerender, "delete")));
   }
   acts.appendChild(el("span", "text-xs text-slate-400 ml-auto", `saves to ${info.save_path || "?"}`));
@@ -1052,8 +1079,7 @@ export async function mount(rootEl, ctx) {
       );
       return;
     }
-    body.appendChild(renderSyncBar(ctx, data, view));
-    body.appendChild(renderFilterTabs(data, view, render));
+    body.appendChild(renderFilterTabs(ctx, data, view, render));
     body.appendChild(renderControls(data, view, render));
     body.appendChild(renderGrid(ctx, data, view, render));
     const errs = renderErrors(data);

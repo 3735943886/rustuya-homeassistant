@@ -446,6 +446,36 @@ def test_save_converter_refuses_broken_override(monkeypatch, tmp_path):
     assert not conv.exists()  # nothing persisted on refusal
 
 
+def test_save_all_converters_replaces_whole_file(monkeypatch, tmp_path):
+    conv = _isolated_converters(monkeypatch, tmp_path)
+    ctx = FakeCtx(devices=DEVICES, bridge_cfg=LEGACY_CFG)
+    p = DiscoveryPlugin(ctx)
+    p.backup_dir = str(tmp_path / "bk")
+    pid = DEVICES[0]["product_id"]
+
+    res = p.save_all_converters({pid: {"model": "ALL-Y"}})
+    assert res["saved"] and res["count"] == 1
+    assert json.load(open(conv)) == {pid: {"model": "ALL-Y"}}
+    payloads, _ = p.generator.generate(DEVICES[0])
+    assert "ALL-Y" in json.dumps(payloads)
+
+    # a full-file replace overwrites prior content (and backs it up)
+    res2 = p.save_all_converters({})
+    assert res2["count"] == 0 and res2["backup"] is not None
+    assert json.load(open(conv)) == {}
+
+
+def test_save_all_converters_rejects_bad_shape(monkeypatch, tmp_path):
+    conv = _isolated_converters(monkeypatch, tmp_path)
+    p = DiscoveryPlugin(FakeCtx(devices=DEVICES, bridge_cfg=LEGACY_CFG))
+    p.backup_dir = str(tmp_path / "bk")
+    with pytest.raises(ValueError, match="product_id"):
+        p.save_all_converters(["not", "a", "dict"])
+    with pytest.raises(ValueError, match="must be a JSON object"):
+        p.save_all_converters({DEVICES[0]["product_id"]: "not-a-dict"})
+    assert not conv.exists()
+
+
 # ── register() wiring (needs fastapi) ────────────────────────────────────
 def test_register_wires_host_surfaces():
     pytest.importorskip("fastapi")

@@ -365,6 +365,28 @@ class DiscoveryPlugin:
                 out.append({"id": d["id"], "name": d.get("name", d["id"]), "error": str(e)})
         return {"product_id": product_id, "devices": out}
 
+    def save_all_converters(self, mapping: Any) -> Dict[str, Any]:
+        """Replace the *entire* converters file with `mapping` (the UI's "All"
+        editor). Validates it's product_id -> object and that nothing breaks
+        generation across the fleet, backs up the old file, then writes + reloads."""
+        if not isinstance(mapping, dict):
+            raise ValueError("converters must be a JSON object of product_id -> override")
+        for pid, override in mapping.items():
+            if not isinstance(override, dict):
+                raise ValueError(f"override for {pid} must be a JSON object")
+        gen = self._generator_with(mapping)
+        try:
+            for d in self.ctx.devices().values():
+                gen.generate(d)
+        except Exception as e:  # any generation failure → 400, not a 500
+            raise ValueError(f"converters break generation: {e}") from e
+        backup_path = backup.snapshot_file(
+            self.backup_dir, str(converter.savable_path(None)), prefix="converters"
+        )
+        path = converter.save_converters(mapping)
+        self._reload_generator()
+        return {"saved": True, "count": len(mapping), "path": path, "backup": backup_path}
+
     def save_converter(self, product_id: str, override: Any) -> Dict[str, Any]:
         """Persist (or delete, when `override=None`) one product_id's override.
         Backs up the prior file, refuses an override that crashes generation,
@@ -473,6 +495,15 @@ def register(ctx: Any) -> None:
         except (KeyError, ValueError) as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
         await plugin.push()  # converter change may shift categories → refresh grid
+        return res
+
+    @router.post("/api/discovery/converters/save_all")
+    async def discovery_converters_save_all(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        try:
+            res = plugin.save_all_converters(body.get("converters"))
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        await plugin.push()  # converter changes may shift categories → refresh grid
         return res
 
     ctx.add_api_router(router)
