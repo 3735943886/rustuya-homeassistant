@@ -56,7 +56,13 @@ def build_value_template(comp: str, scale: int = 0,
     snapshot, ignoring the ephemeral no-retain `active`/`passive` deltas.
     Without a payload ``{type}`` (``type_expr`` is None), no such filter is
     emitted — the event topic itself is expected to separate the types, or it
-    can't be told."""
+    can't be told.
+
+    The "no value" fallback renders ``''`` (empty string), not ``none``: HA
+    *ignores* an empty payload (keeps the previous state) but resets the entity
+    to ``unknown`` on a ``None``. This matters when several DPs share one
+    state_topic (no ``{dp}`` in the event topic) and the bridge sends partial
+    deltas — e.g. ``{"1": true}`` must not blank out the entity reading DP 2."""
     # When value_expr is the payload root itself (bare `{value}` payloads), the
     # "<expr> != None" clause duplicates "value_json != None" — drop the tail.
     if value_expr == "value_json":
@@ -70,7 +76,7 @@ def build_value_template(comp: str, scale: int = 0,
         return "{{ { \"event_type\": %s } | to_json if %s else '' }}" % (value_expr, cond)
 
     if comp in ["binary_sensor", "switch"] and not val_map:
-        inner = ("'true' if %s and %s == true else 'false' if %s and %s == false else none"
+        inner = ("'true' if %s and %s == true else 'false' if %s and %s == false else ''"
                  % (guard, value_expr, guard, value_expr))
     else:
         base = value_expr
@@ -89,7 +95,7 @@ def build_value_template(comp: str, scale: int = 0,
         # codec derived, so the payload-shape adaptation is preserved.
         if transform:
             final_expr = transform % final_expr
-        inner = "%s if %s else none" % (final_expr, guard)
+        inner = "%s if %s else ''" % (final_expr, guard)
 
     # In cache mode the bridge emits no-retain `active`/`passive` deltas plus a
     # retained `state` snapshot. Pick which {type} this entity reads. Parens

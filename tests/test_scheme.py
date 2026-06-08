@@ -38,7 +38,7 @@ def test_value_template_event_and_switch_and_scale():
     assert c.value_template("switch") == (
         "{{ ('true' if value_json is defined and value_json != None and value_json.value != None "
         "and value_json.value == true else 'false' if value_json is defined and value_json != None "
-        "and value_json.value != None and value_json.value == false else none) "
+        "and value_json.value != None and value_json.value == false else '') "
         "if value_json.type | default('') == 'state' else '' }}"
     )
     assert "/ 10) | round(1)" in c.value_template("sensor", scale=1)
