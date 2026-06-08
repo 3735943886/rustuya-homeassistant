@@ -7,6 +7,7 @@ dist/
 .rustuya-ha-backups/
 *.json
 !custom_converters.json
-!tests/fixtures/synthetic_devices.json
-!tests/fixtures/legacy_bridge_config.json
-!tests/golden/synthetic_snapshots.json
+# Test fixtures/golden are synthetic (no private device data) — always tracked,
+# so new ones aren't silently dropped by the *.json rule above.
+!tests/fixtures/*.json
+!tests/golden/*.json
