@@ -255,10 +255,10 @@ function renderDetailPanel(d) {
     for (const m of det.mismatched) {
       const block = el("div");
       block.appendChild(
-        el("div", "font-mono text-slate-500 dark:text-slate-400 mb-1", m.topic),
+        el("div", "font-mono text-slate-500 dark:text-slate-400 mb-1 break-all", m.topic),
       );
       for (const f of m.fields || []) {
-        const row = el("div", "pl-3 mb-1");
+        const row = el("div", "pl-3 mb-1 break-all");
         row.appendChild(el("span", "font-medium", `${f.key}: `));
         row.appendChild(
           el("span", "text-rose-600 dark:text-rose-400 line-through", JSON.stringify(f.actual)),
@@ -276,12 +276,31 @@ function renderDetailPanel(d) {
     if (!topics?.length) return;
     const b = el("div");
     b.appendChild(el("div", `font-medium ${cls}`, `${label} (${topics.length})`));
-    for (const t of topics) b.appendChild(el("div", "font-mono pl-3 text-slate-500", t));
+    for (const t of topics) b.appendChild(el("div", "font-mono pl-3 text-slate-500 break-all", t));
     wrap.appendChild(b);
   };
   topicList("missing", det.missing, "text-rose-600 dark:text-rose-400");
   topicList("unexpected", det.unexpected, "text-purple-600 dark:text-purple-400");
   return wrap;
+}
+
+// A data cell that reflows for mobile: a normal <td> on `sm`+ screens, but a
+// labelled flex row on narrow screens, where the table collapses into per-
+// device cards and the <thead> is hidden (so each cell carries its own label).
+// `content` may be a string or a pre-built Node.
+function cell(label, content) {
+  const td = el(
+    "td",
+    "block sm:table-cell py-1 sm:pr-3 max-sm:flex max-sm:items-baseline max-sm:justify-between max-sm:gap-3",
+  );
+  if (label) {
+    td.appendChild(
+      el("span", "sm:hidden shrink-0 text-slate-400 dark:text-slate-500 font-medium", label),
+    );
+  }
+  if (content instanceof Node) td.appendChild(content);
+  else td.appendChild(el("span", "max-sm:text-right max-sm:break-all", content == null ? "" : String(content)));
+  return td;
 }
 
 function renderGrid(ctx, data, view, rerender) {
@@ -301,8 +320,11 @@ function renderGrid(ctx, data, view, rerender) {
       "No devices match the current filter.",
     );
   }
-  const table = el("table", "w-full text-sm");
-  const thead = el("thead", "text-left text-slate-500 dark:text-slate-400");
+  // Below `sm` the table reflows into per-device cards (each <tr> a card, each
+  // <td> a labelled row); at `sm`+ it's a normal table that can scroll if the
+  // 7 columns ever exceed the panel width.
+  const table = el("table", "w-full text-sm max-sm:block");
+  const thead = el("thead", "hidden sm:table-header-group text-left text-slate-500 dark:text-slate-400");
   const htr = el("tr");
   for (const h of ["", "Status", "Device", "ID", "matched / expected", "diff", ""]) {
     htr.appendChild(el("th", "py-1 pr-3 font-medium", h));
@@ -310,18 +332,17 @@ function renderGrid(ctx, data, view, rerender) {
   thead.appendChild(htr);
   table.appendChild(thead);
 
-  const tbody = el("tbody");
+  const tbody = el("tbody", "max-sm:block");
   for (const d of devices) {
     const expandable = !!d.detail;
     const isOpen = view.expanded.has(d.id);
     const tr = el(
       "tr",
-      "border-t border-slate-100 dark:border-slate-800 align-top" +
+      "align-top block sm:table-row sm:border-t border-slate-100 dark:border-slate-800 " +
+        "max-sm:rounded-lg max-sm:border max-sm:border-slate-200 max-sm:dark:border-slate-700 " +
+        "max-sm:bg-white max-sm:dark:bg-slate-800/60 max-sm:p-3 max-sm:mb-2" +
         (expandable ? " cursor-pointer" : ""),
     );
-    // chevron / expand toggle
-    const caret = el("td", "py-1 pr-2 text-slate-400 select-none w-4", expandable ? (isOpen ? "▾" : "▸") : "");
-    tr.appendChild(caret);
     if (expandable) {
       tr.addEventListener("click", (ev) => {
         if (ev.target.tagName === "BUTTON") return; // don't toggle when hitting an action
@@ -331,7 +352,19 @@ function renderGrid(ctx, data, view, rerender) {
       });
     }
 
-    const status = el("td", "py-1 pr-3");
+    // chevron / expand toggle — its own column on desktop; on mobile it rides
+    // alongside the status chip (the caret column is hidden there).
+    const caret = el(
+      "td",
+      "hidden sm:table-cell py-1 pr-2 text-slate-400 select-none w-4",
+      expandable ? (isOpen ? "▾" : "▸") : "",
+    );
+    tr.appendChild(caret);
+
+    const status = el(
+      "td",
+      "block sm:table-cell py-1 sm:pr-3 max-sm:flex max-sm:items-center max-sm:justify-between max-sm:mb-1",
+    );
     status.appendChild(
       el(
         "span",
@@ -339,29 +372,33 @@ function renderGrid(ctx, data, view, rerender) {
         LABEL[d.category] || d.category,
       ),
     );
+    if (expandable) {
+      status.appendChild(el("span", "sm:hidden text-slate-400 select-none", isOpen ? "▾" : "▸"));
+    }
     tr.appendChild(status);
-    tr.appendChild(el("td", "py-1 pr-3", d.name || ""));
+    tr.appendChild(cell("Device", d.name || ""));
     tr.appendChild(
-      el("td", "py-1 pr-3 font-mono text-xs text-slate-500 dark:text-slate-400", d.id || ""),
+      cell(
+        "ID",
+        el("span", "font-mono text-xs text-slate-500 dark:text-slate-400 max-sm:text-right max-sm:break-all", d.id || ""),
+      ),
     );
     if (d.category === "orphans") {
-      tr.appendChild(el("td", "py-1 pr-3 text-slate-400", "—"));
+      tr.appendChild(cell("matched / expected", "—"));
       tr.appendChild(
-        el("td", "py-1 pr-3 text-xs text-slate-500", (d.topics || []).join(", ")),
+        cell("diff", el("span", "text-xs text-slate-500 max-sm:text-right max-sm:break-all", (d.topics || []).join(", "))),
       );
-      tr.appendChild(el("td", "py-1 pr-3"));
+      tr.appendChild(el("td", "hidden sm:table-cell py-1 pr-3"));
     } else {
-      tr.appendChild(
-        el("td", "py-1 pr-3", `${d.matched ?? 0} / ${d.expected ?? 0}`),
-      );
+      tr.appendChild(cell("matched / expected", `${d.matched ?? 0} / ${d.expected ?? 0}`));
       const parts = [];
       if (d.mismatched) parts.push(`~${d.mismatched}`);
       if (d.missing) parts.push(`-${d.missing}`);
       if (d.unexpected) parts.push(`+${d.unexpected}`);
       tr.appendChild(
-        el("td", "py-1 pr-3 text-xs text-slate-500", parts.join("  ") || "—"),
+        cell("diff", el("span", "text-xs text-slate-500 max-sm:text-right max-sm:break-all", parts.join("  ") || "—")),
       );
-      const actions = el("td", "py-1 pr-3 whitespace-nowrap");
+      const actions = el("td", "block sm:table-cell py-1 sm:pr-3 max-sm:mt-2 whitespace-nowrap");
       const sp = el("span", "flex gap-1");
       sp.appendChild(
         btn("Publish", BTN_GHOST, () => runAction(ctx, "publish", { ids: [d.id] }, false)),
@@ -375,16 +412,18 @@ function renderGrid(ctx, data, view, rerender) {
     tbody.appendChild(tr);
 
     if (expandable && isOpen) {
-      const dtr = el("tr", "bg-slate-50 dark:bg-slate-800/40");
-      const cell = el("td", "px-2");
-      cell.colSpan = 7;
-      cell.appendChild(renderDetailPanel(d));
-      dtr.appendChild(cell);
+      const dtr = el("tr", "block sm:table-row bg-slate-50 dark:bg-slate-800/40 max-sm:rounded-lg max-sm:-mt-1 max-sm:mb-2");
+      const dcell = el("td", "block sm:table-cell px-2 max-sm:px-3 max-sm:pb-2");
+      dcell.colSpan = 7;
+      dcell.appendChild(renderDetailPanel(d));
+      dtr.appendChild(dcell);
       tbody.appendChild(dtr);
     }
   }
   table.appendChild(tbody);
-  return table;
+  const scroller = el("div", "overflow-x-auto");
+  scroller.appendChild(table);
+  return scroller;
 }
 
 function renderErrors(data) {
@@ -498,7 +537,7 @@ function renderConvPreview(preview) {
       b.appendChild(
         el("div", "font-medium", `${d.name} (${d.id}) — ${topics.length} topic(s) · ${d.source || ""}`),
       );
-      const pre = el("pre", "font-mono whitespace-pre-wrap text-slate-500 dark:text-slate-400");
+      const pre = el("pre", "font-mono whitespace-pre-wrap break-all text-slate-500 dark:text-slate-400");
       pre.textContent = jsonPretty(d.topics);
       b.appendChild(pre);
     }
