@@ -280,6 +280,26 @@ def test_clear_writes_empty_retained(tmp_path):
     asyncio.run(go())
 
 
+def test_clear_by_explicit_topics(tmp_path):
+    """Orphan clear path: clearing by topic list (not device id) retain-clears
+    exactly the listed topics that are actually retained, ignoring unknown ones."""
+    async def go():
+        ctx = FakeCtx(devices=DEVICES, bridge_cfg=LEGACY_CFG)
+        p = DiscoveryPlugin(ctx)
+        p.backup_dir = str(tmp_path)
+        _seed_retained(p, DEVICES, LEGACY_CFG)
+        topics = sorted(p.retained.keys())
+        target = topics[:1]  # clear just the first retained topic
+        res = await p.clear(topics=target + ["homeassistant/sensor/ghost/config"])
+        assert res["executed"] is True
+        assert res["msg_count"] == 1  # the bogus topic isn't retained -> skipped
+        published = [t for t, payload, retain in ctx.bridge_client.published]
+        assert published == target
+        assert all(payload == "" and retain for _, payload, retain in ctx.bridge_client.published)
+
+    asyncio.run(go())
+
+
 def test_restore_reverts_to_snapshot(tmp_path):
     async def go():
         ctx = FakeCtx(devices=DEVICES, bridge_cfg=LEGACY_CFG)

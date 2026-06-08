@@ -10,27 +10,18 @@
 // its plan via a dry-run, confirms, then executes — the grid refreshes itself
 // from the namespace push (broker echo) afterwards.
 
+// [key, label, color] — color drives the filter-tab pill and must match the
+// card's left-stripe color (CAT_STYLE) so a category reads as one hue.
 const CATEGORIES = [
   ["perfect", "Perfect", "emerald"],
   ["mismatched_payload", "Mismatched", "amber"],
   ["partially_missing", "Partial", "yellow"],
-  ["pure_missing", "Missing", "rose"],
+  ["pure_missing", "Missing", "sky"],
   ["unexpected_topics", "Unexpected", "purple"],
   ["no_dp_config", "No DP config", "slate"],
-  ["orphans", "Orphans", "red"],
+  ["orphans", "Orphans", "rose"],
 ];
-
-const COLOR = {
-  emerald: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200",
-  amber: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200",
-  yellow: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-200",
-  rose: "bg-rose-100 text-rose-800 dark:bg-rose-900/40 dark:text-rose-200",
-  purple: "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-200",
-  slate: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
-  red: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200",
-};
 const LABEL = Object.fromEntries(CATEGORIES.map(([k, l]) => [k, l]));
-const CHIP = Object.fromEntries(CATEGORIES.map(([k, , c]) => [k, COLOR[c]]));
 
 function el(tag, cls, text) {
   const e = document.createElement(tag);
@@ -60,6 +51,15 @@ const NEEDS_SYNC = new Set([
   "mismatched_payload",
   "partially_missing",
   "pure_missing",
+  "unexpected_topics",
+]);
+
+// Categories with retained topics of ours that a per-device clear can remove.
+// pure_missing has nothing published yet; no_dp_config we never generate for.
+const CAN_CLEAR = new Set([
+  "perfect",
+  "mismatched_payload",
+  "partially_missing",
   "unexpected_topics",
 ]);
 
@@ -120,32 +120,53 @@ async function runAction(ctx, action, body, danger) {
   }
 }
 
-function renderCounts(data, view, rerender) {
-  const wrap = el("div", "flex flex-wrap gap-2 mb-3 items-center");
+const ALL_CAT_KEYS = CATEGORIES.map(([k]) => k);
+
+// Filter-tab styling mirroring the manager's: a colored pill per category that
+// doubles as count + toggle. Active = filled saturated; idle = faint tint.
+const FILTER_STYLES = {
+  all:     { active: "bg-slate-700 text-white border-slate-700 dark:bg-slate-200 dark:text-slate-900 dark:border-slate-200", idle: "bg-white text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-600" },
+  emerald: { active: "bg-emerald-600 text-white border-emerald-600", idle: "bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-700" },
+  amber:   { active: "bg-amber-600 text-white border-amber-600",     idle: "bg-amber-50 text-amber-700 border-amber-300 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-700" },
+  yellow:  { active: "bg-yellow-500 text-white border-yellow-500",   idle: "bg-yellow-50 text-yellow-700 border-yellow-300 dark:bg-yellow-900/30 dark:text-yellow-300 dark:border-yellow-700" },
+  rose:    { active: "bg-rose-600 text-white border-rose-600",       idle: "bg-rose-50 text-rose-700 border-rose-300 dark:bg-rose-900/30 dark:text-rose-300 dark:border-rose-700" },
+  sky:     { active: "bg-sky-600 text-white border-sky-600",         idle: "bg-sky-50 text-sky-700 border-sky-300 dark:bg-sky-900/30 dark:text-sky-300 dark:border-sky-700" },
+  purple:  { active: "bg-purple-600 text-white border-purple-600",   idle: "bg-purple-50 text-purple-700 border-purple-300 dark:bg-purple-900/30 dark:text-purple-300 dark:border-purple-700" },
+  slate:   { active: "bg-slate-600 text-white border-slate-600",     idle: "bg-slate-50 text-slate-600 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-600" },
+};
+
+function filterPill(label, count, on, color, onClick) {
+  const st = FILTER_STYLES[color] || FILTER_STYLES.slate;
+  return btn(`${label}${count ? ` ${count}` : ""}`, `px-2 py-1 rounded border ${on ? st.active : st.idle}`, onClick);
+}
+
+// Manager-style category filter: multi-select colored tabs + an "all" pill that
+// toggles every category at once. Tabs with 0 fade so the eye lands on the
+// actionable ones. `view.filters` is the set of enabled category keys.
+function renderFilterTabs(data, view, rerender) {
+  const wrap = el("div", "flex flex-wrap gap-1 mb-3 text-xs");
   const counts = data.counts || {};
-  for (const [key, label] of CATEGORIES.map(([k, l]) => [k, l])) {
-    const n = counts[key] || 0;
-    if (!n && key !== "perfect") continue;
-    const active = view.category === key;
-    const chip = btn(
-      `${label}: ${n}`,
-      `px-2 py-1 rounded text-xs font-medium ${CHIP[key]} ${
-        active ? "ring-2 ring-slate-500 dark:ring-slate-300" : ""
-      }`,
-      () => {
-        view.category = active ? null : key; // toggle filter
-        rerender();
-      },
-    );
-    chip.title = active ? "click to clear filter" : `filter to ${label}`;
-    wrap.appendChild(chip);
-  }
-  const src = el(
-    "span",
-    "px-2 py-1 rounded text-xs bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 ml-auto",
-    `scheme: ${data.config_source || "?"} · retained: ${data.retained_topics ?? 0}`,
+  const allOn = ALL_CAT_KEYS.every((k) => view.filters.has(k));
+  const total = ALL_CAT_KEYS.reduce((n, k) => n + (counts[k] || 0), 0);
+  wrap.appendChild(
+    filterPill("all", total, allOn, "all", () => {
+      if (allOn) view.filters.clear();
+      else ALL_CAT_KEYS.forEach((k) => view.filters.add(k));
+      rerender();
+    }),
   );
-  wrap.appendChild(src);
+  for (const [key, label, color] of CATEGORIES) {
+    const n = counts[key] || 0;
+    const on = view.filters.has(key);
+    const pill = filterPill(label, n, on, color, () => {
+      if (on) view.filters.delete(key);
+      else view.filters.add(key);
+      rerender();
+    });
+    if (n === 0 && !on) pill.classList.add("opacity-50");
+    pill.title = on ? `hide ${label}` : `show ${label}`;
+    wrap.appendChild(pill);
+  }
   return wrap;
 }
 
@@ -181,10 +202,11 @@ function renderControls(data, view, rerender) {
   });
   bar.appendChild(sort);
 
-  if (view.category || view.search) {
+  const allOn = ALL_CAT_KEYS.every((k) => view.filters.has(k));
+  if (!allOn || view.search) {
     bar.appendChild(
       btn("clear filters", BTN_GHOST, () => {
-        view.category = null;
+        view.filters = new Set(ALL_CAT_KEYS);
         view.search = "";
         rerender();
       }),
@@ -200,8 +222,7 @@ const CAT_ORDER = [
 ];
 
 function applyView(devices, view) {
-  let out = devices;
-  if (view.category) out = out.filter((d) => d.category === view.category);
+  let out = devices.filter((d) => view.filters.has(d.category));
   if (view.search) {
     const q = view.search.toLowerCase();
     out = out.filter(
@@ -222,29 +243,83 @@ function applyView(devices, view) {
   });
 }
 
-function renderToolbar(ctx, data) {
-  const bar = el("div", "flex flex-wrap gap-2 mb-3 items-center");
+// One small colored button in the sync bar, styled like the manager's.
+function barBtn(label, variant, title, onClick) {
+  const styles = {
+    sky:   "border-sky-300 dark:border-sky-700 bg-sky-50 dark:bg-sky-900/40 hover:bg-sky-100 dark:hover:bg-sky-900/60 text-sky-800 dark:text-sky-200",
+    rose:  "border-rose-300 dark:border-rose-700 bg-rose-50 dark:bg-rose-900/40 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-rose-800 dark:text-rose-200",
+    slate: "border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200",
+    dark:  "border-transparent bg-slate-900 hover:bg-slate-800 dark:bg-slate-200 dark:text-slate-900 dark:hover:bg-white text-white font-medium",
+  }[variant];
+  const b = btn(label, `text-xs px-2 py-1 rounded border whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed ${styles}`, onClick);
+  b.title = title;
+  return b;
+}
+
+// "Apply all" = the full reconcile: publish everything needing sync AND clear
+// every orphan retained topic, behind a single preview + confirm.
+async function doApplyAll(ctx, syncIds, orphanTopics) {
+  let pub = { msg_count: 0 }, clr = { msg_count: 0 };
+  try {
+    if (syncIds.length) pub = await ctx.api("/api/discovery/publish", { method: "POST", body: { ids: syncIds, dry_run: true } });
+    if (orphanTopics.length) clr = await ctx.api("/api/discovery/clear", { method: "POST", body: { topics: orphanTopics, dry_run: true } });
+  } catch (e) {
+    ctx.toast && ctx.toast(`apply all: ${e.message}`, "error");
+    return;
+  }
+  if (!pub.msg_count && !clr.msg_count) {
+    ctx.toast && ctx.toast("apply all: nothing to do", "ok");
+    return;
+  }
+  const ok = ctx.confirm
+    ? await ctx.confirm({
+        title: "Apply all — confirm",
+        message: `Publish ${pub.msg_count} retained message(s); clear ${clr.msg_count} orphan topic(s).`,
+        okLabel: "Apply all",
+        danger: true,
+      })
+    : true;
+  if (!ok) return;
+  try {
+    if (syncIds.length) await ctx.api("/api/discovery/publish", { method: "POST", body: { ids: syncIds, dry_run: false } });
+    if (orphanTopics.length) await ctx.api("/api/discovery/clear", { method: "POST", body: { topics: orphanTopics, dry_run: false } });
+    ctx.toast && ctx.toast("apply all: done", "ok");
+  } catch (e) {
+    ctx.toast && ctx.toast(`apply all: ${e.message}`, "error");
+  }
+}
+
+// Manager-style bulk-action bar: scoped buttons (hidden when their scope is
+// empty) + an "Apply all" primary on the right. Also carries the scheme badge.
+function renderSyncBar(ctx, data, view) {
   const devices = data.devices || [];
   const syncIds = devices.filter((d) => NEEDS_SYNC.has(d.category)).map((d) => d.id);
-  const allIds = devices.filter((d) => d.category !== "orphans").map((d) => d.id);
+  const orphanTopics = devices.filter((d) => d.category === "orphans").flatMap((d) => d.topics || []);
 
-  const publishSync = btn(
-    `Publish needing sync (${syncIds.length})`,
-    BTN_PRIMARY,
-    () => runAction(ctx, "publish", { ids: syncIds }, false),
+  const bar = el(
+    "div",
+    "flex flex-wrap items-center gap-1.5 bg-white dark:bg-slate-800 " +
+      "border border-slate-200 dark:border-slate-700 rounded-lg px-2 py-1.5 mb-3",
   );
-  publishSync.disabled = syncIds.length === 0;
-  bar.appendChild(publishSync);
-
-  const clearAll = btn("Clear all", BTN_DANGER, () =>
-    runAction(ctx, "clear", { ids: allIds }, true),
-  );
-  clearAll.disabled = allIds.length === 0;
-  bar.appendChild(clearAll);
-
   bar.appendChild(
-    btn("Restore last", BTN_GHOST, () => runAction(ctx, "restore", {}, true)),
+    el(
+      "span",
+      "text-[11px] text-slate-400 dark:text-slate-500 whitespace-nowrap mr-1",
+      `scheme: ${data.config_source || "?"} · retained: ${data.retained_topics ?? 0}`,
+    ),
   );
+  if (syncIds.length) {
+    bar.appendChild(barBtn(`Publish ${syncIds.length}`, "sky", "Publish all devices needing sync", () => runAction(ctx, "publish", { ids: syncIds }, false)));
+  }
+  if (orphanTopics.length) {
+    bar.appendChild(barBtn(`Clear orphans ${orphanTopics.length}`, "rose", "Clear all orphan retained topics", () => runAction(ctx, "clear", { topics: orphanTopics }, true)));
+  }
+  bar.appendChild(barBtn("Restore", "slate", "Restore last backup", () => runAction(ctx, "restore", {}, true)));
+
+  const apply = barBtn("Apply all", "dark", "Publish needing sync + clear orphans", () => doApplyAll(ctx, syncIds, orphanTopics));
+  apply.classList.add("ml-auto");
+  apply.disabled = !syncIds.length && !orphanTopics.length;
+  bar.appendChild(apply);
   return bar;
 }
 
@@ -306,10 +381,16 @@ const CAT_FALLBACK = { edge: "border-l-slate-200 dark:border-l-slate-600", wash:
 // click from also toggling the card's expand.
 function iconBtn(glyph, title, onClick, variant) {
   const styles = {
-    default: "border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-500 dark:text-slate-300",
-    danger:  "border-rose-200 dark:border-rose-800 bg-white dark:bg-slate-700 hover:bg-rose-50 dark:hover:bg-rose-900/40 text-rose-600 dark:text-rose-400",
+    default:       "border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-500 dark:text-slate-300",
+    danger:        "border-rose-200 dark:border-rose-800 bg-white dark:bg-slate-700 hover:bg-rose-50 dark:hover:bg-rose-900/40 text-rose-600 dark:text-rose-400",
+    "danger-fill": "border-rose-300 dark:border-rose-700 bg-rose-100 dark:bg-rose-900/70 hover:bg-rose-200 dark:hover:bg-rose-800 text-rose-700 dark:text-rose-200",
   }[variant || "default"];
-  const b = el("button", `w-5 h-5 inline-flex items-center justify-center rounded border text-xs leading-none ${styles}`, glyph);
+  const b = el(
+    "button",
+    `w-5 h-5 inline-flex items-center justify-center rounded border text-xs leading-none ` +
+      `disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-white dark:disabled:hover:bg-slate-700 ${styles}`,
+    glyph,
+  );
   b.type = "button";
   b.title = title;
   b.addEventListener("click", (ev) => { ev.stopPropagation(); onClick(); });
@@ -344,15 +425,24 @@ function deviceCard(ctx, d, view, rerender) {
     });
   }
 
-  // ── header row 1: name + right cluster (metric · actions · caret) ──
+  // ── header row 1: name (or orphan topic) + right cluster ──
   const top = el("div", "flex items-center gap-2 min-w-0");
   top.appendChild(
-    el("span", "font-medium text-sm text-slate-900 dark:text-slate-100 truncate min-w-0", d.name || d.id || ""),
+    el(
+      "span",
+      isOrphan
+        ? "font-mono text-xs text-slate-700 dark:text-slate-300 break-all min-w-0"
+        : "font-medium text-sm text-slate-900 dark:text-slate-100 truncate min-w-0",
+      isOrphan ? ((d.topics || []).join(", ") || "(orphan)") : (d.name || d.id || ""),
+    ),
   );
   const right = el("span", "ml-auto flex items-center gap-1.5 shrink-0");
   if (isOrphan) {
-    const n = (d.topics || []).length;
-    right.appendChild(el("span", "text-[11px] font-mono text-slate-500 dark:text-slate-400", `${n} topic${n === 1 ? "" : "s"}`));
+    // Orphans have no device to publish; the only action is clearing the stray
+    // retained topic(s) — cleared by explicit topic (their owner id is unknown).
+    right.appendChild(
+      iconBtn("🗑", "Clear retained topic(s)", () => runAction(ctx, "clear", { topics: d.topics || [] }, true), "danger-fill"),
+    );
   } else {
     const ok = (d.matched ?? 0) === (d.expected ?? 0);
     const metric = el(
@@ -362,8 +452,14 @@ function deviceCard(ctx, d, view, rerender) {
     );
     metric.title = "matched / expected entities";
     right.appendChild(metric);
-    right.appendChild(iconBtn("+", "Publish", () => runAction(ctx, "publish", { ids: [d.id] }, false)));
-    right.appendChild(iconBtn("−", "Clear", () => runAction(ctx, "clear", { ids: [d.id] }, true), "danger"));
+    // + disabled when nothing needs publishing (perfect / no_dp_config);
+    // − disabled when nothing of ours is retained (pure_missing / no_dp_config).
+    const pub = iconBtn("+", "Publish", () => runAction(ctx, "publish", { ids: [d.id] }, false));
+    pub.disabled = !NEEDS_SYNC.has(d.category);
+    right.appendChild(pub);
+    const clr = iconBtn("−", "Clear", () => runAction(ctx, "clear", { ids: [d.id] }, true), "danger");
+    clr.disabled = !CAN_CLEAR.has(d.category);
+    right.appendChild(clr);
   }
   if (expandable) {
     right.appendChild(iconBtn(isOpen ? "▾" : "▸", isOpen ? "Collapse" : "Expand", toggle));
@@ -371,23 +467,26 @@ function deviceCard(ctx, d, view, rerender) {
   top.appendChild(right);
   card.appendChild(top);
 
-  // ── header row 2: id (under name) + diff summary on the right ──
-  const bottom = el("div", "flex items-center gap-2 mt-0.5 min-w-0");
-  bottom.appendChild(
-    d.id && d.id !== d.name
-      ? el("span", "font-mono text-[11px] text-slate-400 dark:text-slate-500 truncate min-w-0", d.id)
-      : el("span", "min-w-0"),
-  );
-  const parts = [];
-  if (d.mismatched) parts.push(["~" + d.mismatched, "text-amber-600 dark:text-amber-400"]);
-  if (d.missing) parts.push(["-" + d.missing, "text-rose-600 dark:text-rose-400"]);
-  if (d.unexpected) parts.push(["+" + d.unexpected, "text-purple-600 dark:text-purple-400"]);
-  if (parts.length) {
-    const diff = el("span", "ml-auto flex items-center gap-1.5 shrink-0 text-[10px] font-mono");
-    for (const [t, c] of parts) diff.appendChild(el("span", c, t));
-    bottom.appendChild(diff);
+  // ── header row 2: id (under name) + diff summary; skipped for orphans whose
+  // identity is the topic already shown above. ──
+  if (!isOrphan) {
+    const bottom = el("div", "flex items-center gap-2 mt-0.5 min-w-0");
+    bottom.appendChild(
+      d.id && d.id !== d.name
+        ? el("span", "font-mono text-[11px] text-slate-400 dark:text-slate-500 truncate min-w-0", d.id)
+        : el("span", "min-w-0"),
+    );
+    const parts = [];
+    if (d.mismatched) parts.push(["~" + d.mismatched, "text-amber-600 dark:text-amber-400"]);
+    if (d.missing) parts.push(["-" + d.missing, "text-rose-600 dark:text-rose-400"]);
+    if (d.unexpected) parts.push(["+" + d.unexpected, "text-purple-600 dark:text-purple-400"]);
+    if (parts.length) {
+      const diff = el("span", "ml-auto flex items-center gap-1.5 shrink-0 text-[10px] font-mono");
+      for (const [t, c] of parts) diff.appendChild(el("span", c, t));
+      bottom.appendChild(diff);
+    }
+    card.appendChild(bottom);
   }
-  card.appendChild(bottom);
 
   if (expandable && isOpen) card.appendChild(renderDetailPanel(d));
   return card;
@@ -619,8 +718,9 @@ export async function mount(rootEl, ctx) {
   rootEl.appendChild(container);
 
   // View state persists across re-renders (live pushes + filter/sort/expand).
+  // `filters` is the set of enabled category keys (manager-style multi-select).
   const view = {
-    search: "", category: null, sort: "category", expanded: new Set(),
+    search: "", filters: new Set(ALL_CAT_KEYS), sort: "category", expanded: new Set(),
     conv: { open: false, loaded: false, info: null, selected: "", text: "", preview: null, busy: false },
   };
   let lastData = null;
@@ -641,9 +741,9 @@ export async function mount(rootEl, ctx) {
       );
       return;
     }
-    body.appendChild(renderCounts(data, view, render));
+    body.appendChild(renderSyncBar(ctx, data, view));
+    body.appendChild(renderFilterTabs(data, view, render));
     body.appendChild(renderControls(data, view, render));
-    body.appendChild(renderToolbar(ctx, data));
     body.appendChild(renderGrid(ctx, data, view, render));
     const errs = renderErrors(data);
     if (errs) body.appendChild(errs);

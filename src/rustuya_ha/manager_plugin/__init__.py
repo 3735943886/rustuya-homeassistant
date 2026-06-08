@@ -242,9 +242,25 @@ class DiscoveryPlugin:
         result["executed"] = True
         return result
 
-    async def clear(self, ids: List[str], dry_run: bool = False) -> Dict[str, Any]:
-        """Clear all retained discovery topics owned by the given device ids."""
-        msgs, per_device = plan.clear_plan(self.retained, ids)
+    async def clear(
+        self,
+        ids: Optional[List[str]] = None,
+        dry_run: bool = False,
+        topics: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Clear retained discovery topics.
+
+        By device id (``ids``) — every retained topic each device owns — or by
+        explicit ``topics`` (used for orphans, whose owner id the verifier can't
+        attribute, so an id-based clear can't reach them). Only topics actually
+        retained are emitted as retain-clears.
+        """
+        if topics is not None:
+            present = [t for t in topics if t in self.retained]
+            msgs = [{"topic": t, "payload": "", "retain": True} for t in sorted(present)]
+            per_device = [{"id": "(topics)", "clear": len(present)}] if present else []
+        else:
+            msgs, per_device = plan.clear_plan(self.retained, ids or [])
         result = {
             "action": "clear", "dry_run": dry_run,
             "per_device": per_device, "msg_count": len(msgs),
@@ -415,7 +431,11 @@ def register(ctx: Any) -> None:
     @router.post("/api/discovery/clear")
     async def discovery_clear(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
         try:
-            return await plugin.clear(body.get("ids", []), bool(body.get("dry_run", False)))
+            return await plugin.clear(
+                body.get("ids", []),
+                bool(body.get("dry_run", False)),
+                topics=body.get("topics"),
+            )
         except RuntimeError as e:
             raise HTTPException(status_code=503, detail=str(e)) from e
 
