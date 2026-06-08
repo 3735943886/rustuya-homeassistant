@@ -128,6 +128,36 @@ async function runAction(ctx, action, body, danger) {
 }
 
 const ALL_CAT_KEYS = CATEGORIES.map(([k]) => k);
+const SORT_KEYS = ["category", "name", "id"];
+
+// View prefs (category filter + sort) persist in the browser like the manager's,
+// so a reload doesn't reset them. Search stays transient on purpose.
+const LS_FILTERS = "rustuya-ha.discovery.filters";
+const LS_SORT = "rustuya-ha.discovery.sort";
+
+function loadFilters() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(LS_FILTERS) || "null");
+    if (Array.isArray(raw)) {
+      const valid = raw.filter((k) => ALL_CAT_KEYS.includes(k));
+      if (valid.length) return new Set(valid); // empty stored -> fall back to all
+    }
+  } catch {}
+  return new Set(ALL_CAT_KEYS);
+}
+function loadSort() {
+  try {
+    const s = localStorage.getItem(LS_SORT);
+    if (SORT_KEYS.includes(s)) return s;
+  } catch {}
+  return "category";
+}
+function persistView(view) {
+  try {
+    localStorage.setItem(LS_FILTERS, JSON.stringify([...view.filters]));
+    localStorage.setItem(LS_SORT, view.sort);
+  } catch {}
+}
 
 // Filter-tab styling mirroring the manager's: a colored pill per category that
 // doubles as count + toggle. Active = filled saturated; idle = faint tint.
@@ -160,6 +190,7 @@ function renderFilterTabs(ctx, data, view, rerender) {
     filterPill("all", total, allOn, "all", () => {
       if (allOn) view.filters.clear();
       else ALL_CAT_KEYS.forEach((k) => view.filters.add(k));
+      persistView(view);
       rerender();
     }),
   );
@@ -169,6 +200,7 @@ function renderFilterTabs(ctx, data, view, rerender) {
     const pill = filterPill(label, n, on, color, () => {
       if (on) view.filters.delete(key);
       else view.filters.add(key);
+      persistView(view);
       rerender();
     });
     if (n === 0 && !on) pill.classList.add("opacity-50");
@@ -183,8 +215,8 @@ function renderFilterTabs(ctx, data, view, rerender) {
   const actionable = syncIds.length + orphanTopics.length;
   const actions = el("span", "ml-auto flex items-center gap-1.5");
   const pub = barBtn(
-    `Publish${actionable ? ` ${actionable}` : ""}`,
-    "sky",
+    "Publish",
+    "slate", // neutral like Restore — a colored button read as the "Missing" (sky) category
     "Review by category, then publish / clear orphans",
     () => openApplyModal(ctx, data, { publish: true, clear: true }),
   );
@@ -244,6 +276,7 @@ function renderControls(data, view, rerender) {
   sort.appendChild(og);
   sort.addEventListener("change", () => {
     view.sort = sort.value;
+    persistView(view);
     rerender();
   });
   bar.appendChild(sort);
@@ -254,6 +287,7 @@ function renderControls(data, view, rerender) {
       btn("clear filters", BTN_GHOST, () => {
         view.filters = new Set(ALL_CAT_KEYS);
         view.search = "";
+        persistView(view);
         rerender();
       }),
     );
@@ -1056,9 +1090,10 @@ export async function mount(rootEl, ctx) {
   rootEl.appendChild(container);
 
   // View state persists across re-renders (live pushes + filter/sort/expand).
-  // `filters` is the set of enabled category keys (manager-style multi-select).
+  // `filters` (category multi-select) and `sort` are seeded from localStorage so
+  // they survive a reload, like the manager's filter/sort.
   const view = {
-    search: "", filters: new Set(ALL_CAT_KEYS), sort: "category", expanded: new Set(),
+    search: "", filters: loadFilters(), sort: loadSort(), expanded: new Set(),
     conv: { open: false, loaded: false, info: null, selected: "", text: "", preview: null, busy: false },
   };
   let lastData = null;
