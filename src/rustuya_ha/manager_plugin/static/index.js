@@ -172,9 +172,15 @@ function renderFilterTabs(data, view, rerender) {
 
 function renderControls(data, view, rerender) {
   const bar = el("div", "flex flex-wrap gap-2 mb-3 items-center");
+  // Manager-style search: grows to fill the row, solid bg, a custom ✕ clear
+  // button (the native WebKit search X is suppressed by the host's head CSS).
+  const searchWrap = el("div", "relative flex-1 min-w-[180px]");
   const search = el(
     "input",
-    "px-2 py-1 rounded border border-slate-300 dark:border-slate-600 bg-transparent text-sm w-56",
+    "w-full text-sm pl-3 pr-8 py-1.5 rounded border border-slate-300 dark:border-slate-600 " +
+      "bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 " +
+      "placeholder:text-slate-400 dark:placeholder:text-slate-500 " +
+      "focus:outline-none focus:ring-2 focus:ring-slate-400 dark:focus:ring-slate-500",
   );
   search.type = "search";
   search.placeholder = "search name / id…";
@@ -184,7 +190,19 @@ function renderControls(data, view, rerender) {
     view.search = search.value;
     rerender();
   });
-  bar.appendChild(search);
+  const clearX = el(
+    "button",
+    "absolute right-1.5 top-1/2 -translate-y-1/2 w-5 h-5 inline-flex items-center justify-center " +
+      "rounded-full text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 " +
+      "hover:bg-slate-100 dark:hover:bg-slate-700 text-xs leading-none" + (view.search ? "" : " hidden"),
+    "✕",
+  );
+  clearX.type = "button";
+  clearX.title = "Clear";
+  clearX.addEventListener("click", () => { view.search = ""; rerender(); });
+  searchWrap.appendChild(search);
+  searchWrap.appendChild(clearX);
+  bar.appendChild(searchWrap);
 
   // Manager-style: the "sort by" label is folded into the select via an
   // <optgroup> header (shown when open), so no separate label row is needed.
@@ -291,8 +309,8 @@ function openApplyModal(ctx, data, opts) {
   }
 
   let applying = false;
-  const overlay = el("div", "fixed inset-0 z-50 bg-black/40 flex items-start justify-center p-4 overflow-y-auto");
-  const panel = el("div", "bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 rounded-lg shadow-xl w-full max-w-lg my-8 max-h-[85vh] flex flex-col");
+  const overlay = el("div", "fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4");
+  const panel = el("div", "bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 rounded-lg shadow-xl w-full max-w-lg max-h-[85vh] flex flex-col");
   overlay.appendChild(panel);
 
   const head = el("div", "px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2");
@@ -415,6 +433,128 @@ function openApplyModal(ctx, data, opts) {
   document.body.appendChild(overlay);
 }
 
+// Restore modal: pick a server-side backup (newest pre-selected), dry-run to
+// preview the plan, then confirm. No OS file upload — backups already live in
+// `.rustuya-ha-backups/`; drop a file there to have it appear in the list.
+async function openRestoreModal(ctx) {
+  let list = [];
+  try {
+    const r = await ctx.api("/api/discovery/backups");
+    list = r.backups || [];
+  } catch (e) {
+    ctx.toast && ctx.toast(`restore: ${e.message}`, "error");
+    return;
+  }
+  if (!list.length) {
+    ctx.toast && ctx.toast("no backups found", "ok");
+    return;
+  }
+  // API returns newest-first (mtime desc); list[0] == what a default restore
+  // would pick.
+  let selected = list[0].path;
+  let phase = "select"; // select -> confirm -> done
+  let busy = false;
+
+  const overlay = el("div", "fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4");
+  const panel = el("div", "bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 rounded-lg shadow-xl w-full max-w-lg max-h-[85vh] flex flex-col");
+  overlay.appendChild(panel);
+
+  const head = el("div", "px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2");
+  head.appendChild(el("h3", "text-sm font-semibold", "Restore backup"));
+  const closeX = iconBtn("✕", "Close", () => close());
+  closeX.classList.add("ml-auto");
+  head.appendChild(closeX);
+  panel.appendChild(head);
+
+  const bodyEl = el("div", "p-3 overflow-y-auto");
+  panel.appendChild(bodyEl);
+
+  const foot = el("div", "px-4 py-3 border-t border-slate-200 dark:border-slate-700 flex items-center gap-2");
+  const progress = el("span", "text-xs text-slate-500 dark:text-slate-400 min-w-0 break-all");
+  const cancelBtn = btn("Cancel", `ml-auto ${BTN_GHOST}`, () => close());
+  const okBtn = el("button", BTN_PRIMARY, "Restore");
+  okBtn.type = "button";
+  okBtn.addEventListener("click", () => onOk());
+  foot.appendChild(progress);
+  foot.appendChild(cancelBtn);
+  foot.appendChild(okBtn);
+  panel.appendChild(foot);
+
+  function close() {
+    if (busy) return;
+    document.removeEventListener("keydown", onKey);
+    overlay.remove();
+  }
+  function onKey(e) { if (e.key === "Escape") close(); }
+  document.addEventListener("keydown", onKey);
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+
+  function renderList() {
+    bodyEl.innerHTML = "";
+    const ul = el("div", "divide-y divide-slate-100 dark:divide-slate-700 border border-slate-200 dark:border-slate-700 rounded");
+    list.forEach((bk, i) => {
+      const row = el("label", "px-3 py-2 flex items-center gap-2 text-sm cursor-pointer");
+      const rb = el("input", "shrink-0");
+      rb.type = "radio";
+      rb.name = "rha-restore";
+      rb.checked = bk.path === selected;
+      rb.disabled = busy || phase !== "select";
+      rb.addEventListener("change", () => { selected = bk.path; });
+      row.appendChild(rb);
+      row.appendChild(el("span", "flex-1 min-w-0 break-all font-mono text-xs", bk.name));
+      if (i === 0) row.appendChild(el("span", "text-[10px] uppercase tracking-wide text-emerald-600 dark:text-emerald-400 shrink-0", "latest"));
+      ul.appendChild(row);
+    });
+    bodyEl.appendChild(ul);
+  }
+
+  async function onOk() {
+    if (busy) return;
+    if (phase === "done") { close(); return; }
+    busy = true;
+    cancelBtn.disabled = true;
+    closeX.disabled = true;
+    okBtn.disabled = true;
+    if (phase === "select") {
+      try {
+        const plan = await ctx.api("/api/discovery/restore", { method: "POST", body: { file: selected, dry_run: true } });
+        progress.textContent = `Re-publish ${plan.set ?? 0}, clear ${plan.clear ?? 0} — Confirm to apply.`;
+        phase = "confirm";
+        okBtn.textContent = "Confirm restore";
+      } catch (e) {
+        progress.textContent = `Error: ${e.message}`;
+        ctx.toast && ctx.toast(`restore: ${e.message}`, "error");
+      }
+      busy = false;
+      cancelBtn.disabled = false;
+      closeX.disabled = false;
+      okBtn.disabled = false;
+      renderList();
+      return;
+    }
+    // confirm -> execute
+    try {
+      const res = await ctx.api("/api/discovery/restore", { method: "POST", body: { file: selected, dry_run: false } });
+      const ok = !!res.executed;
+      progress.textContent = ok ? "Restored." : (res.error || "nothing to do");
+      ctx.toast && ctx.toast(ok ? "restore: done" : `restore: ${res.error || "nothing to do"}`, ok ? "ok" : "error");
+    } catch (e) {
+      progress.textContent = `Error: ${e.message}`;
+      ctx.toast && ctx.toast(`restore: ${e.message}`, "error");
+    }
+    busy = false;
+    cancelBtn.disabled = false;
+    closeX.disabled = false;
+    phase = "done";
+    okBtn.textContent = "Done";
+    okBtn.disabled = false;
+    renderList();
+  }
+
+  renderList();
+  document.body.appendChild(overlay);
+}
+
 // Manager-style bulk-action bar: scoped buttons (hidden when their scope is
 // empty) + an "Apply all" primary on the right. Also carries the scheme badge.
 function renderSyncBar(ctx, data, view) {
@@ -440,7 +580,7 @@ function renderSyncBar(ctx, data, view) {
   if (orphanTopics.length) {
     bar.appendChild(barBtn(`Clear orphans ${orphanTopics.length}`, "rose", "Review + clear orphan retained topics", () => openApplyModal(ctx, data, { clear: true })));
   }
-  bar.appendChild(barBtn("Restore", "slate", "Restore last backup", () => runAction(ctx, "restore", {}, true)));
+  bar.appendChild(barBtn("Restore", "slate", "Restore from a backup", () => openRestoreModal(ctx)));
 
   const apply = barBtn("Apply all", "dark", "Review publish + clear orphans, then apply", () => openApplyModal(ctx, data, { publish: true, clear: true }));
   apply.classList.add("ml-auto");
