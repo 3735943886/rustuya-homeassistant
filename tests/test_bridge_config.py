@@ -81,8 +81,9 @@ def test_multi_dp_value_template_indexes():
 def test_bridge_topic_scheme_multi_dp_same_device_topic():
     multi = BridgeConfig.from_dict({"mqtt_event_topic": "{root}/event/{type}/{id}"})
     s = BridgeTopicScheme(multi)
-    # no {dp} in template -> all dps share one device-level topic; {type}->passive
-    assert s.state("dev", "1") == s.state("dev", "2") == "rustuya/event/passive/dev"
+    # no {dp} in template -> all dps share one device-level topic; pass-through
+    # (retain=false) wildcards the {type} level to catch active|passive.
+    assert s.state("dev", "1") == s.state("dev", "2") == "rustuya/event/+/dev"
 
 
 def test_skip_active_gating():
@@ -120,14 +121,21 @@ def test_event_active_filter_gated_on_payload_type():
 
 def test_state_active_vs_state_topic():
     # bridge README: event entities read the `active` delta topic; stateful
-    # entities read the retained `state` snapshot in cache mode, else the
-    # `passive` delta (pass-through has no snapshot).
+    # entities read the retained `state` snapshot in cache mode, else (pass-
+    # through, no snapshot) a {type} wildcard catching active|passive.
     topic = {"mqtt_event_topic": "{root}/event/{type}/{id}/{dp}"}
     cache = BridgeTopicScheme(BridgeConfig.from_dict({**topic, "mqtt_retain": True}))
     assert cache.state("dev", "5") == "rustuya/event/state/dev/5"
     assert cache.state("dev", "5", active=True) == "rustuya/event/active/dev/5"
-    # pass-through (retain=false): no snapshot -> stateful falls back to passive
+    # pass-through (retain=false): no snapshot -> wildcard the {type} level so
+    # whichever stream the device uses (active push / passive readback) is caught.
     passthru = BridgeTopicScheme(BridgeConfig.from_dict(topic))
-    assert passthru.state("dev", "5") == "rustuya/event/passive/dev/5"
+    assert passthru.state("dev", "5") == "rustuya/event/+/dev/5"
+    # delta DPs still pin their explicit stream (no wildcard -> no double-count).
+    assert passthru.state("dev", "5", active=True) == "rustuya/event/active/dev/5"
+    assert passthru.state("dev", "5", passive=True) == "rustuya/event/passive/dev/5"
+    # when the event topic has no {type}, "+" has nothing to fill -> plain topic.
+    no_type = BridgeTopicScheme(BridgeConfig.from_dict({"mqtt_event_topic": "{root}/event/{id}/{dp}"}))
+    assert no_type.state("dev", "5") == "rustuya/event/dev/5"
     # legacy (no {type}) is unaffected by the flag
     assert BridgeTopicScheme(LEGACY).state("dev", "5", active=True) == "rustuya/event/dev/5"

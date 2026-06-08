@@ -204,20 +204,30 @@ class BridgeTopicScheme:
 
     def state(self, dev_id: str, dp_id: str, active: bool = False,
               passive: bool = False) -> str:
-        # rustuya-bridge README §Events: `active`/`passive` = no-retain raw
-        # deltas (event semantics, fire once); `state` = retained full snapshot
-        # (current state, recoverable on reconnect), emitted only in cache mode
-        # (mqtt_retain). HA `event` entities need the `active` delta; stateful
-        # entities read the retained `state` snapshot in cache mode, falling back
-        # to the `passive` delta in pass-through mode where no snapshot exists.
-        # `passive` is the explicit raw-passive delta (e.g. the add_ele passive
-        # companion). (No-op when {type} not in topic.)
+        # rustuya-bridge §Events: `active` = device push (Tuya cmd 8, wrapped
+        # `data.dps`); `passive` = query response / periodic report (cmd 16, root
+        # `dps`); `state` = retained full snapshot, emitted ONLY in cache mode
+        # (mqtt_retain=true), recoverable on reconnect.
+        #
+        #   - `event` entities + delta DPs pass active=/passive= explicitly and
+        #     keep that single stream (a delta read from both would double-count).
+        #   - stateful (absolute) entities: in cache mode read the retained
+        #     `state` snapshot; in pass-through there's NO snapshot and the bridge
+        #     sends each delta to active OR passive depending on the device, so we
+        #     subscribe with a wildcard on the {type} level to catch both. When
+        #     the event topic has no {type} (the types collide on one topic, or
+        #     {type} rides in the payload) `type="+"` renders to the plain topic —
+        #     and the pass-through value_template emits no type filter, so the
+        #     value is read regardless. (Absolute values are idempotent, so seeing
+        #     both an active and a passive copy is harmless: last write wins.)
         if active:
             mtype = "active"
         elif passive:
             mtype = "passive"
+        elif self.config.retain:
+            mtype = "state"
         else:
-            mtype = "state" if self.config.retain else "passive"
+            mtype = "+"  # pass-through: wildcard the {type} level (catch active|passive)
         return render_topic(self.config.event_topic,
                             root=self.config.root, id=dev_id, dp=str(dp_id),
                             type=mtype)
