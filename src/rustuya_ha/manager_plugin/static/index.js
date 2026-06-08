@@ -256,37 +256,157 @@ function barBtn(label, variant, title, onClick) {
   return b;
 }
 
-// "Apply all" = the full reconcile: publish everything needing sync AND clear
-// every orphan retained topic, behind a single preview + confirm.
-async function doApplyAll(ctx, syncIds, orphanTopics) {
-  let pub = { msg_count: 0 }, clr = { msg_count: 0 };
-  try {
-    if (syncIds.length) pub = await ctx.api("/api/discovery/publish", { method: "POST", body: { ids: syncIds, dry_run: true } });
-    if (orphanTopics.length) clr = await ctx.api("/api/discovery/clear", { method: "POST", body: { topics: orphanTopics, dry_run: true } });
-  } catch (e) {
-    ctx.toast && ctx.toast(`apply all: ${e.message}`, "error");
+// Section tints for the apply modal — border + faint wash per scope.
+const SECTION_TINT = {
+  sky:  "border-sky-200 dark:border-sky-700 bg-sky-50 dark:bg-sky-900/20",
+  rose: "border-rose-200 dark:border-rose-700 bg-rose-50 dark:bg-rose-900/20",
+};
+const ROW_STATUS = {
+  pending: ["pending", "text-slate-400 dark:text-slate-500"],
+  ok:      ["✓", "text-emerald-600 dark:text-emerald-400"],
+  error:   ["✘", "text-rose-600 dark:text-rose-400"],
+};
+
+// Manager-style bulk modal: lists the devices to publish and/or the orphan
+// topics to clear with per-row checkboxes (+ select-all per section) so the
+// user reviews and trims the selection before applying. Self-contained (the
+// plugin can't reach the host's modal), appended to <body>.
+function openApplyModal(ctx, data, opts) {
+  const devices = data.devices || [];
+  const pub = opts.publish
+    ? devices.filter((d) => NEEDS_SYNC.has(d.category)).map((d) => ({ id: d.id, name: d.name, category: d.category, checked: true, status: "pending" }))
+    : [];
+  const clr = opts.clear
+    ? devices.filter((d) => d.category === "orphans").flatMap((d) => (d.topics || []).map((t) => ({ topic: t, checked: true, status: "pending" })))
+    : [];
+  if (!pub.length && !clr.length) {
+    ctx.toast && ctx.toast("nothing to do", "ok");
     return;
   }
-  if (!pub.msg_count && !clr.msg_count) {
-    ctx.toast && ctx.toast("apply all: nothing to do", "ok");
-    return;
+
+  let applying = false;
+  const overlay = el("div", "fixed inset-0 z-50 bg-black/40 flex items-start justify-center p-4 overflow-y-auto");
+  const panel = el("div", "bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 rounded-lg shadow-xl w-full max-w-lg my-8 max-h-[85vh] flex flex-col");
+  overlay.appendChild(panel);
+
+  const head = el("div", "px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2");
+  head.appendChild(el("h3", "text-sm font-semibold", opts.publish && opts.clear ? "Apply all" : opts.publish ? "Publish needing sync" : "Clear orphans"));
+  const closeX = iconBtn("✕", "Close", () => close());
+  closeX.classList.add("ml-auto");
+  head.appendChild(closeX);
+  panel.appendChild(head);
+
+  const bodyEl = el("div", "p-3 space-y-3 overflow-y-auto");
+  panel.appendChild(bodyEl);
+
+  const foot = el("div", "px-4 py-3 border-t border-slate-200 dark:border-slate-700 flex items-center gap-2");
+  const progress = el("span", "text-xs text-slate-500 dark:text-slate-400 min-w-0 truncate");
+  const cancelBtn = btn("Cancel", `ml-auto ${BTN_GHOST}`, () => close());
+  let applyHandler = apply;
+  const applyBtn = el("button", BTN_PRIMARY, "Apply");
+  applyBtn.type = "button";
+  applyBtn.addEventListener("click", () => applyHandler());
+  foot.appendChild(progress);
+  foot.appendChild(cancelBtn);
+  foot.appendChild(applyBtn);
+  panel.appendChild(foot);
+
+  function close() {
+    if (applying) return;
+    document.removeEventListener("keydown", onKey);
+    overlay.remove();
   }
-  const ok = ctx.confirm
-    ? await ctx.confirm({
-        title: "Apply all — confirm",
-        message: `Publish ${pub.msg_count} retained message(s); clear ${clr.msg_count} orphan topic(s).`,
-        okLabel: "Apply all",
-        danger: true,
-      })
-    : true;
-  if (!ok) return;
-  try {
-    if (syncIds.length) await ctx.api("/api/discovery/publish", { method: "POST", body: { ids: syncIds, dry_run: false } });
-    if (orphanTopics.length) await ctx.api("/api/discovery/clear", { method: "POST", body: { topics: orphanTopics, dry_run: false } });
-    ctx.toast && ctx.toast("apply all: done", "ok");
-  } catch (e) {
-    ctx.toast && ctx.toast(`apply all: ${e.message}`, "error");
+  function onKey(e) { if (e.key === "Escape") close(); }
+  document.addEventListener("keydown", onKey);
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+
+  function section(label, color, items, fillRow) {
+    if (!items.length) return;
+    const sec = el("div", `border rounded ${SECTION_TINT[color] || ""}`);
+    const h = el("div", "px-3 py-2 flex items-center gap-2 border-b border-black/5 dark:border-white/10");
+    h.appendChild(el("strong", "text-sm", label));
+    h.appendChild(el("span", "text-xs", String(items.length)));
+    const allLbl = el("label", "ml-auto text-xs flex items-center gap-1 cursor-pointer");
+    const allCb = el("input", "rounded");
+    allCb.type = "checkbox";
+    allCb.checked = items.every((i) => i.checked);
+    allCb.indeterminate = items.some((i) => i.checked) && !allCb.checked;
+    allCb.disabled = applying;
+    allCb.addEventListener("change", () => { items.forEach((i) => (i.checked = allCb.checked)); rerenderBody(); });
+    allLbl.appendChild(allCb);
+    allLbl.appendChild(el("span", null, "select all"));
+    h.appendChild(allLbl);
+    sec.appendChild(h);
+
+    const ul = el("div", "divide-y divide-black/5 dark:divide-white/10 bg-white/60 dark:bg-slate-800/40");
+    for (const it of items) {
+      const row = el("label", "px-3 py-2 flex items-center gap-2 text-sm cursor-pointer");
+      const cb = el("input", "rounded shrink-0");
+      cb.type = "checkbox";
+      cb.checked = it.checked;
+      cb.disabled = applying;
+      cb.addEventListener("change", () => { it.checked = cb.checked; allCb.checked = items.every((i) => i.checked); allCb.indeterminate = items.some((i) => i.checked) && !allCb.checked; updateApply(); });
+      row.appendChild(cb);
+      const txt = el("span", "flex-1 min-w-0 break-all");
+      fillRow(txt, it);
+      row.appendChild(txt);
+      const [glyph, gcls] = ROW_STATUS[it.status];
+      row.appendChild(el("span", `text-xs shrink-0 ${gcls}`, glyph));
+      ul.appendChild(row);
+    }
+    sec.appendChild(ul);
+    bodyEl.appendChild(sec);
   }
+
+  function rerenderBody() {
+    bodyEl.innerHTML = "";
+    section("Publish", "sky", pub, (txt, it) => {
+      txt.appendChild(el("span", "font-medium", it.name || it.id));
+      txt.appendChild(el("span", "ml-2 font-mono text-[11px] text-slate-400 dark:text-slate-500", it.id));
+    });
+    section("Clear orphans", "rose", clr, (txt, it) => {
+      txt.appendChild(el("span", "font-mono text-xs", it.topic));
+    });
+    updateApply();
+  }
+
+  function selectedCount() { return pub.filter((i) => i.checked).length + clr.filter((i) => i.checked).length; }
+  function updateApply() {
+    const n = selectedCount();
+    applyBtn.textContent = applying ? "Applying…" : n ? `Apply ${n}` : "Apply";
+    applyBtn.disabled = applying || n === 0;
+  }
+
+  async function apply() {
+    if (applying) return;
+    const ids = pub.filter((i) => i.checked).map((i) => i.id);
+    const topics = clr.filter((i) => i.checked).map((i) => i.topic);
+    if (!ids.length && !topics.length) return;
+    applying = true;
+    cancelBtn.disabled = true;
+    closeX.disabled = true;
+    rerenderBody();
+    let pubOk = true, clrOk = true, errMsg = "";
+    try { if (ids.length) await ctx.api("/api/discovery/publish", { method: "POST", body: { ids, dry_run: false } }); }
+    catch (e) { pubOk = false; errMsg = e.message; }
+    try { if (topics.length) await ctx.api("/api/discovery/clear", { method: "POST", body: { topics, dry_run: false } }); }
+    catch (e) { clrOk = false; errMsg = e.message; }
+    for (const i of pub) if (i.checked) i.status = pubOk ? "ok" : "error";
+    for (const i of clr) if (i.checked) i.status = clrOk ? "ok" : "error";
+    applying = false;
+    cancelBtn.disabled = false;
+    closeX.disabled = false;
+    rerenderBody();
+    const okAll = pubOk && clrOk;
+    progress.textContent = okAll ? "Applied." : `Error: ${errMsg}`;
+    ctx.toast && ctx.toast(okAll ? "apply: done" : `apply: ${errMsg}`, okAll ? "ok" : "error");
+    applyHandler = close;
+    applyBtn.textContent = "Done";
+    applyBtn.disabled = false;
+  }
+
+  rerenderBody();
+  document.body.appendChild(overlay);
 }
 
 // Manager-style bulk-action bar: scoped buttons (hidden when their scope is
@@ -309,14 +429,14 @@ function renderSyncBar(ctx, data, view) {
     ),
   );
   if (syncIds.length) {
-    bar.appendChild(barBtn(`Publish ${syncIds.length}`, "sky", "Publish all devices needing sync", () => runAction(ctx, "publish", { ids: syncIds }, false)));
+    bar.appendChild(barBtn(`Publish ${syncIds.length}`, "sky", "Review + publish devices needing sync", () => openApplyModal(ctx, data, { publish: true })));
   }
   if (orphanTopics.length) {
-    bar.appendChild(barBtn(`Clear orphans ${orphanTopics.length}`, "rose", "Clear all orphan retained topics", () => runAction(ctx, "clear", { topics: orphanTopics }, true)));
+    bar.appendChild(barBtn(`Clear orphans ${orphanTopics.length}`, "rose", "Review + clear orphan retained topics", () => openApplyModal(ctx, data, { clear: true })));
   }
   bar.appendChild(barBtn("Restore", "slate", "Restore last backup", () => runAction(ctx, "restore", {}, true)));
 
-  const apply = barBtn("Apply all", "dark", "Publish needing sync + clear orphans", () => doApplyAll(ctx, syncIds, orphanTopics));
+  const apply = barBtn("Apply all", "dark", "Review publish + clear orphans, then apply", () => openApplyModal(ctx, data, { publish: true, clear: true }));
   apply.classList.add("ml-auto");
   apply.disabled = !syncIds.length && !orphanTopics.length;
   bar.appendChild(apply);
