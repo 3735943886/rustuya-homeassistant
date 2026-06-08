@@ -280,47 +280,69 @@ function barBtn(label, variant, title, onClick) {
   return b;
 }
 
-// Section tints for the apply modal — border + faint wash per scope.
+// Section tints for the apply modal — border + faint wash per category color.
 const SECTION_TINT = {
-  sky:  "border-sky-200 dark:border-sky-700 bg-sky-50 dark:bg-sky-900/20",
-  rose: "border-rose-200 dark:border-rose-700 bg-rose-50 dark:bg-rose-900/20",
+  emerald: "border-emerald-200 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-900/20",
+  amber:   "border-amber-200 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20",
+  yellow:  "border-yellow-200 dark:border-yellow-700 bg-yellow-50 dark:bg-yellow-900/20",
+  sky:     "border-sky-200 dark:border-sky-700 bg-sky-50 dark:bg-sky-900/20",
+  purple:  "border-purple-200 dark:border-purple-700 bg-purple-50 dark:bg-purple-900/20",
+  slate:   "border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-800/40",
+  rose:    "border-rose-200 dark:border-rose-700 bg-rose-50 dark:bg-rose-900/20",
 };
+const CAT_COLOR = Object.fromEntries(CATEGORIES.map(([k, , c]) => [k, c]));
 const ROW_STATUS = {
   pending: ["pending", "text-slate-400 dark:text-slate-500"],
   ok:      ["✓", "text-emerald-600 dark:text-emerald-400"],
   error:   ["✘", "text-rose-600 dark:text-rose-400"],
 };
 
-// Manager-style bulk modal: lists the devices to publish and/or the orphan
-// topics to clear with per-row checkboxes (+ select-all per section) so the
-// user reviews and trims the selection before applying. Self-contained (the
-// plugin can't reach the host's modal), appended to <body>.
+// Manager-style bulk modal: the publish scope is split into one collapsible
+// group per category (+ orphans for the clear scope), each with a select-all,
+// so publishing a single category is one click. Groups start collapsed (the
+// header select-all works without expanding) to stay short with large fleets;
+// empty categories are omitted. Self-contained, appended to <body>.
 function openApplyModal(ctx, data, opts) {
   const devices = data.devices || [];
-  const pub = opts.publish
-    ? devices.filter((d) => NEEDS_SYNC.has(d.category)).map((d) => ({ id: d.id, name: d.name, category: d.category, checked: true, status: "pending" }))
-    : [];
-  const clr = opts.clear
-    ? devices.filter((d) => d.category === "orphans").flatMap((d) => (d.topics || []).map((t) => ({ topic: t, checked: true, status: "pending" })))
-    : [];
-  if (!pub.length && !clr.length) {
+  const groups = [];
+  if (opts.publish) {
+    for (const cat of CAT_ORDER) {
+      if (!NEEDS_SYNC.has(cat)) continue;
+      const items = devices
+        .filter((d) => d.category === cat)
+        .map((d) => ({ id: d.id, name: d.name, checked: true, status: "pending" }));
+      if (items.length) groups.push({ key: cat, label: LABEL[cat], color: CAT_COLOR[cat], kind: "publish", items });
+    }
+  }
+  if (opts.clear) {
+    const items = devices
+      .filter((d) => d.category === "orphans")
+      .flatMap((d) => (d.topics || []).map((t) => ({ topic: t, checked: true, status: "pending" })));
+    if (items.length) groups.push({ key: "orphans", label: LABEL.orphans, color: CAT_COLOR.orphans, kind: "clear", items });
+  }
+  if (!groups.length) {
     ctx.toast && ctx.toast("nothing to do", "ok");
     return;
   }
 
   let applying = false;
+  // Collapsed by default; a lone group auto-expands (nothing to hide).
+  const expanded = new Set(groups.length === 1 ? [groups[0].key] : []);
+
   const overlay = el("div", "fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4");
   const panel = el("div", "bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 rounded-lg shadow-xl w-full max-w-lg max-h-[85vh] flex flex-col");
   overlay.appendChild(panel);
 
+  const hasPub = groups.some((g) => g.kind === "publish");
+  const hasClr = groups.some((g) => g.kind === "clear");
   const head = el("div", "px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2");
-  head.appendChild(el("h3", "text-sm font-semibold", opts.publish && opts.clear ? "Apply all" : opts.publish ? "Publish needing sync" : "Clear orphans"));
+  head.appendChild(el("h3", "text-sm font-semibold", hasPub && hasClr ? "Publish & clear orphans" : hasClr ? "Clear orphans" : "Publish needing sync"));
   const closeX = iconBtn("✕", "Close", () => close());
   closeX.classList.add("ml-auto");
   head.appendChild(closeX);
   panel.appendChild(head);
 
-  const bodyEl = el("div", "p-3 space-y-3 overflow-y-auto");
+  const bodyEl = el("div", "p-3 space-y-2 overflow-y-auto");
   panel.appendChild(bodyEl);
 
   const foot = el("div", "px-4 py-3 border-t border-slate-200 dark:border-slate-700 flex items-center gap-2");
@@ -344,57 +366,68 @@ function openApplyModal(ctx, data, opts) {
   document.addEventListener("keydown", onKey);
   overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
 
-  function section(label, color, items, fillRow) {
-    if (!items.length) return;
-    const sec = el("div", `border rounded ${SECTION_TINT[color] || ""}`);
-    const h = el("div", "px-3 py-2 flex items-center gap-2 border-b border-black/5 dark:border-white/10");
-    h.appendChild(el("strong", "text-sm", label));
-    h.appendChild(el("span", "text-xs", String(items.length)));
+  function groupSection(g) {
+    const isOpen = expanded.has(g.key);
+    const checkedN = g.items.filter((i) => i.checked).length;
+    const allChecked = checkedN === g.items.length;
+    const sec = el("div", `border rounded ${SECTION_TINT[g.color] || ""}`);
+
+    // Header: caret + label + count toggles expand; the select-all label does not.
+    const h = el("div", "px-3 py-2 flex items-center gap-2 cursor-pointer select-none");
+    h.appendChild(el("span", "text-slate-400 dark:text-slate-500 text-xs w-3 shrink-0", isOpen ? "▾" : "▸"));
+    h.appendChild(el("strong", "text-sm", g.label));
+    h.appendChild(el("span", "text-xs text-slate-500 dark:text-slate-400", `${checkedN}/${g.items.length}`));
     const allLbl = el("label", "ml-auto text-xs flex items-center gap-1 cursor-pointer");
     const allCb = el("input", "rounded");
     allCb.type = "checkbox";
-    allCb.checked = items.every((i) => i.checked);
-    allCb.indeterminate = items.some((i) => i.checked) && !allCb.checked;
+    allCb.checked = allChecked;
+    allCb.indeterminate = checkedN > 0 && !allChecked;
     allCb.disabled = applying;
-    allCb.addEventListener("change", () => { items.forEach((i) => (i.checked = allCb.checked)); rerenderBody(); });
+    allCb.addEventListener("change", () => { g.items.forEach((i) => (i.checked = allCb.checked)); rerenderBody(); });
     allLbl.appendChild(allCb);
     allLbl.appendChild(el("span", null, "select all"));
     h.appendChild(allLbl);
+    h.addEventListener("click", (ev) => {
+      if (ev.target.closest("label, input")) return; // let the checkbox do its thing
+      if (isOpen) expanded.delete(g.key); else expanded.add(g.key);
+      rerenderBody();
+    });
     sec.appendChild(h);
 
-    const ul = el("div", "divide-y divide-black/5 dark:divide-white/10 bg-white/60 dark:bg-slate-800/40");
-    for (const it of items) {
+    if (!isOpen) return sec;
+
+    const ul = el("div", "divide-y divide-black/5 dark:divide-white/10 bg-white/60 dark:bg-slate-800/40 border-t border-black/5 dark:border-white/10");
+    for (const it of g.items) {
       const row = el("label", "px-3 py-2 flex items-center gap-2 text-sm cursor-pointer");
       const cb = el("input", "rounded shrink-0");
       cb.type = "checkbox";
       cb.checked = it.checked;
       cb.disabled = applying;
-      cb.addEventListener("change", () => { it.checked = cb.checked; allCb.checked = items.every((i) => i.checked); allCb.indeterminate = items.some((i) => i.checked) && !allCb.checked; updateApply(); });
+      cb.addEventListener("change", () => { it.checked = cb.checked; rerenderBody(); });
       row.appendChild(cb);
       const txt = el("span", "flex-1 min-w-0 break-all");
-      fillRow(txt, it);
+      if (g.kind === "publish") {
+        txt.appendChild(el("span", "font-medium", it.name || it.id));
+        txt.appendChild(el("span", "ml-2 font-mono text-[11px] text-slate-400 dark:text-slate-500", it.id));
+      } else {
+        txt.appendChild(el("span", "font-mono text-xs", it.topic));
+      }
       row.appendChild(txt);
       const [glyph, gcls] = ROW_STATUS[it.status];
       row.appendChild(el("span", `text-xs shrink-0 ${gcls}`, glyph));
       ul.appendChild(row);
     }
     sec.appendChild(ul);
-    bodyEl.appendChild(sec);
+    return sec;
   }
 
   function rerenderBody() {
     bodyEl.innerHTML = "";
-    section("Publish", "sky", pub, (txt, it) => {
-      txt.appendChild(el("span", "font-medium", it.name || it.id));
-      txt.appendChild(el("span", "ml-2 font-mono text-[11px] text-slate-400 dark:text-slate-500", it.id));
-    });
-    section("Clear orphans", "rose", clr, (txt, it) => {
-      txt.appendChild(el("span", "font-mono text-xs", it.topic));
-    });
+    for (const g of groups) bodyEl.appendChild(groupSection(g));
     updateApply();
   }
 
-  function selectedCount() { return pub.filter((i) => i.checked).length + clr.filter((i) => i.checked).length; }
+  function selectedCount() { return groups.reduce((n, g) => n + g.items.filter((i) => i.checked).length, 0); }
   function updateApply() {
     const n = selectedCount();
     applyBtn.textContent = applying ? "Applying…" : n ? `Apply ${n}` : "Apply";
@@ -403,8 +436,10 @@ function openApplyModal(ctx, data, opts) {
 
   async function apply() {
     if (applying) return;
-    const ids = pub.filter((i) => i.checked).map((i) => i.id);
-    const topics = clr.filter((i) => i.checked).map((i) => i.topic);
+    const pubItems = groups.filter((g) => g.kind === "publish").flatMap((g) => g.items);
+    const clrItems = groups.filter((g) => g.kind === "clear").flatMap((g) => g.items);
+    const ids = pubItems.filter((i) => i.checked).map((i) => i.id);
+    const topics = clrItems.filter((i) => i.checked).map((i) => i.topic);
     if (!ids.length && !topics.length) return;
     applying = true;
     cancelBtn.disabled = true;
@@ -415,8 +450,10 @@ function openApplyModal(ctx, data, opts) {
     catch (e) { pubOk = false; errMsg = e.message; }
     try { if (topics.length) await ctx.api("/api/discovery/clear", { method: "POST", body: { topics, dry_run: false } }); }
     catch (e) { clrOk = false; errMsg = e.message; }
-    for (const i of pub) if (i.checked) i.status = pubOk ? "ok" : "error";
-    for (const i of clr) if (i.checked) i.status = clrOk ? "ok" : "error";
+    for (const i of pubItems) if (i.checked) i.status = pubOk ? "ok" : "error";
+    for (const i of clrItems) if (i.checked) i.status = clrOk ? "ok" : "error";
+    // Expand groups that were applied so their per-row ✓/✘ is visible.
+    for (const g of groups) if (g.items.some((i) => i.checked)) expanded.add(g.key);
     applying = false;
     cancelBtn.disabled = false;
     closeX.disabled = false;
@@ -562,12 +599,15 @@ async function openRestoreModal(ctx) {
   document.body.appendChild(overlay);
 }
 
-// Manager-style bulk-action bar: scoped buttons (hidden when their scope is
-// empty) + an "Apply all" primary on the right. Also carries the scheme badge.
+// Bulk-action bar: a single Publish (opens the grouped review modal — one
+// collapsible group per category plus orphans-to-clear) + Restore. The modal's
+// per-category select-all makes "publish just this category" one click, so the
+// old separate "Clear orphans"/"Apply all" buttons are gone. Carries the badge.
 function renderSyncBar(ctx, data, view) {
   const devices = data.devices || [];
   const syncIds = devices.filter((d) => NEEDS_SYNC.has(d.category)).map((d) => d.id);
   const orphanTopics = devices.filter((d) => d.category === "orphans").flatMap((d) => d.topics || []);
+  const actionable = syncIds.length + orphanTopics.length;
 
   const bar = el(
     "div",
@@ -581,18 +621,16 @@ function renderSyncBar(ctx, data, view) {
       `scheme: ${data.config_source || "?"} · retained: ${data.retained_topics ?? 0}`,
     ),
   );
-  if (syncIds.length) {
-    bar.appendChild(barBtn(`Publish ${syncIds.length}`, "sky", "Review + publish devices needing sync", () => openApplyModal(ctx, data, { publish: true })));
-  }
-  if (orphanTopics.length) {
-    bar.appendChild(barBtn(`Clear orphans ${orphanTopics.length}`, "rose", "Review + clear orphan retained topics", () => openApplyModal(ctx, data, { clear: true })));
-  }
+  const pub = barBtn(
+    `Publish${actionable ? ` ${actionable}` : ""}`,
+    "sky",
+    "Review by category, then publish / clear orphans",
+    () => openApplyModal(ctx, data, { publish: true, clear: true }),
+  );
+  pub.classList.add("ml-auto");
+  pub.disabled = actionable === 0;
+  bar.appendChild(pub);
   bar.appendChild(barBtn("Restore", "slate", "Restore from a backup", () => openRestoreModal(ctx)));
-
-  const apply = barBtn("Apply all", "dark", "Review publish + clear orphans, then apply", () => openApplyModal(ctx, data, { publish: true, clear: true }));
-  apply.classList.add("ml-auto");
-  apply.disabled = !syncIds.length && !orphanTopics.length;
-  bar.appendChild(apply);
   return bar;
 }
 
