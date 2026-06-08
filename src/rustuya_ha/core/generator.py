@@ -93,6 +93,29 @@ class DiscoveryGenerator:
         """The DP a builder-emitted topic addresses — every scheme puts {dp} last."""
         return topic.rsplit("/", 1)[-1]
 
+    # Write-side value encoding per HA component (used by _cmd). Anything not
+    # listed falls back to "raw" (the value sent as a quoted string).
+    _CMD_KIND = {"switch": "bool", "binary_sensor": "bool", "number": "number",
+                 "select": "enum", "text": "string"}
+
+    def _cmd(self, dev_id: str, dp_id, topic_field: str, kind: str = "raw",
+             scale: int = 0, val_map=None, transform=None) -> Dict[str, Any]:
+        """Build a command topic and, when the bridge needs it, the matching
+        ``*_command_template`` — returned as a dict to splat into a payload.
+
+        The template is emitted only when ``codec.command_template`` returns one
+        (i.e. the command topic doesn't carry the DP, so id/dp/action must ride
+        in the payload). The template field name is the topic field with
+        ``_topic`` -> ``_template`` (command_topic->command_template,
+        set_position_topic->set_position_template, ...)."""
+        dp_id = str(dp_id)
+        out = {topic_field: self.scheme.command(dev_id, dp_id)}
+        tmpl = self.codec.command_template(dev_id, dp_id, kind=kind, scale=scale,
+                                           val_map=val_map, transform=transform)
+        if tmpl is not None:
+            out[topic_field.replace("_topic", "_template")] = tmpl
+        return out
+
     def _apply_overrides(self, dev_id: str, entities: Dict[str, Any], overrides: Dict[str, Any]):
         """Merge user ``discovery_overrides`` into generated component payloads.
 
@@ -157,14 +180,24 @@ class DiscoveryGenerator:
             for dp_key, topic_field in self._CMD_ROLES:
                 if dp_key not in block:
                     continue
+                tmpl_field = topic_field.replace("_topic", "_template")
                 if block[dp_key] is None:  # explicit null -> drop the command topic
                     payload.pop(topic_field, None)
+                    payload.pop(tmpl_field, None)
                 else:
-                    payload[topic_field] = self.scheme.command(dev_id, str(block[dp_key]))
+                    kind = "number" if topic_field == "set_position_topic" else "raw"
+                    payload.update(self._cmd(dev_id, str(block[dp_key]), topic_field, kind=kind))
             if block.get("invert_set_position"):
-                # Command direction (HA position -> device): no codec seam exists
-                # for command encoding, so the legacy raw-int form is used.
-                payload["set_position_template"] = "{{ 100 - value | int }}"
+                # Invert the write direction (HA position -> device). Route through
+                # the command codec so the flat-topic JSON wrapper (action/id/dps)
+                # is preserved; falls back to the bare raw-int form on a per-dp
+                # topic (where no template is emitted).
+                pdp = (self._topic_dp(payload["set_position_topic"])
+                       if payload.get("set_position_topic") else None)
+                tmpl = (self.codec.command_template(dev_id, pdp, kind="number",
+                                                    transform="100 - %s")
+                        if pdp is not None else None)
+                payload["set_position_template"] = tmpl or "{{ 100 - value | int }}"
 
             for key, val in block.items():
                 if key not in self._OVERRIDE_RESERVED:
@@ -273,12 +306,12 @@ class DiscoveryGenerator:
                 if category == 'cl': payload["device_class"] = "curtain"
                 elif category == 'mc': payload["device_class"] = "window"
                 if c_dp:
-                    payload["command_topic"] = self.scheme.command(dev_id, c_dp)
+                    payload.update(self._cmd(dev_id, c_dp, "command_topic", kind="raw"))
                     if dps[c_dp]["code"] in ["state", "control", "mach_operate"]:
                         payload.update({"state_topic": self.scheme.state(dev_id, c_dp), "value_template": self.codec.value_template("cover", dp_id=c_dp)})
                     consumed.add(c_dp)
                 if p_dp:
-                    payload.update({"set_position_topic": self.scheme.command(dev_id, p_dp), "position_topic": self.scheme.state(dev_id, s_dp or p_dp), "position_template": self.codec.value_template("cover", dp_id=s_dp or p_dp)})
+                    payload.update({**self._cmd(dev_id, p_dp, "set_position_topic", kind="number", scale=dps[p_dp]['meta'].get('scale', 0)), "position_topic": self.scheme.state(dev_id, s_dp or p_dp), "position_template": self.codec.value_template("cover", dp_id=s_dp or p_dp)})
                     consumed.update([p_dp, s_dp] if s_dp else [p_dp])
                 results[self.scheme.discovery("cover", dev_id, "motor")] = payload
 
@@ -287,14 +320,19 @@ class DiscoveryGenerator:
             t_set, t_cur, mode, sw = self._find_dp(dps, r'^(temp_set|occupied_heating_setpoint)$'), self._find_dp(dps, r'^(temp_current|local_temperature)$'), self._find_dp(dps, r'^(mode|system_mode)$'), self._find_dp(dps, r'^switch$')
             if t_set and t_cur:
                 payload = {"name": None, "unique_id": f"{dev_id}_climate", "device": common_device, **avail}
-                payload.update({"temperature_command_topic": self.scheme.command(dev_id, t_set), "temperature_state_topic": self.scheme.state(dev_id, t_set), "temperature_state_template": self.codec.value_template("climate", dps[t_set]['meta'].get('scale', 0), dp_id=t_set)})
+                payload.update({**self._cmd(dev_id, t_set, "temperature_command_topic", kind="number", scale=dps[t_set]['meta'].get('scale', 0)), "temperature_state_topic": self.scheme.state(dev_id, t_set), "temperature_state_template": self.codec.value_template("climate", dps[t_set]['meta'].get('scale', 0), dp_id=t_set)})
                 payload.update({"current_temperature_topic": self.scheme.state(dev_id, t_cur), "current_temperature_template": self.codec.value_template("climate", dps[t_cur]['meta'].get('scale', 0), dp_id=t_cur)})
                 consumed.update([t_set, t_cur])
                 if mode:
-                    payload.update({"mode_command_topic": self.scheme.command(dev_id, mode), "mode_state_topic": self.scheme.state(dev_id, mode), "mode_state_template": self.codec.value_template("climate", dp_id=mode)})
+                    payload.update({**self._cmd(dev_id, mode, "mode_command_topic", kind="enum", val_map=dps[mode]['meta'].get('val_map')), "mode_state_topic": self.scheme.state(dev_id, mode), "mode_state_template": self.codec.value_template("climate", dp_id=mode)})
                     consumed.add(mode)
                 if sw:
-                    payload["power_command_topic"] = self.scheme.command(dev_id, sw)
+                    # HA climate has no `power_command_template`, so on a flat command
+                    # topic (id/dp only encodable in the payload) power can't be
+                    # routed — emit power_command_topic only when the topic carries
+                    # the DP itself (per-dp layout). Otherwise skip it.
+                    if self.codec.command_template(dev_id, sw, kind="bool") is None:
+                        payload["power_command_topic"] = self.scheme.command(dev_id, sw)
                     consumed.add(sw)
                 results[self.scheme.discovery("climate", dev_id, "thermostat")] = payload
 
@@ -303,13 +341,13 @@ class DiscoveryGenerator:
             sp_dp, sw_dp, osc_dp = self._find_dp(dps, r'^(fan_speed|fan_mode)$'), self._find_dp(dps, r'^switch$'), self._find_dp(dps, r'^fan_horizontal$')
             if sp_dp:
                 payload = {"name": None, "unique_id": f"{dev_id}_fan", "device": common_device, **avail}
-                payload.update({"percentage_command_topic": self.scheme.command(dev_id, sp_dp), "percentage_state_topic": self.scheme.state(dev_id, sp_dp), "percentage_value_template": self.codec.value_template("fan", dp_id=sp_dp)})
+                payload.update({**self._cmd(dev_id, sp_dp, "percentage_command_topic", kind="number", scale=dps[sp_dp]['meta'].get('scale', 0)), "percentage_state_topic": self.scheme.state(dev_id, sp_dp), "percentage_value_template": self.codec.value_template("fan", dp_id=sp_dp)})
                 consumed.add(sp_dp)
                 if sw_dp:
-                    payload.update({"command_topic": self.scheme.command(dev_id, sw_dp), "state_topic": self.scheme.state(dev_id, sw_dp), "state_value_template": self.codec.value_template("fan", dp_id=sw_dp), "payload_on": "true", "payload_off": "false"})
+                    payload.update({**self._cmd(dev_id, sw_dp, "command_topic", kind="bool"), "state_topic": self.scheme.state(dev_id, sw_dp), "state_value_template": self.codec.value_template("fan", dp_id=sw_dp), "payload_on": "true", "payload_off": "false"})
                     consumed.add(sw_dp)
                 if osc_dp:
-                    payload.update({"oscillation_command_topic": self.scheme.command(dev_id, osc_dp), "oscillation_state_topic": self.scheme.state(dev_id, osc_dp), "oscillation_value_template": self.codec.value_template("fan", dp_id=osc_dp), "payload_on": "true", "payload_off": "false"})
+                    payload.update({**self._cmd(dev_id, osc_dp, "oscillation_command_topic", kind="bool"), "oscillation_state_topic": self.scheme.state(dev_id, osc_dp), "oscillation_value_template": self.codec.value_template("fan", dp_id=osc_dp), "payload_on": "true", "payload_off": "false"})
                     consumed.add(osc_dp)
                 results[self.scheme.discovery("fan", dev_id, "fan")] = payload
 
@@ -318,13 +356,13 @@ class DiscoveryGenerator:
             sw_dp, br_dp, tm_dp = self._find_dp(dps, r'^(switch_led|switch)$'), self._find_dp(dps, r'^(bright_value|brightness)$'), self._find_dp(dps, r'^(temp_value|color_temp)$')
             if br_dp:
                 payload = {"name": None, "unique_id": f"{dev_id}_light", "device": common_device, **avail}
-                payload.update({"brightness_command_topic": self.scheme.command(dev_id, br_dp), "brightness_state_topic": self.scheme.state(dev_id, br_dp), "brightness_value_template": self.codec.value_template("light", dp_id=br_dp)})
+                payload.update({**self._cmd(dev_id, br_dp, "brightness_command_topic", kind="number", scale=dps[br_dp]['meta'].get('scale', 0)), "brightness_state_topic": self.scheme.state(dev_id, br_dp), "brightness_value_template": self.codec.value_template("light", dp_id=br_dp)})
                 consumed.add(br_dp)
                 if sw_dp:
-                    payload.update({"command_topic": self.scheme.command(dev_id, sw_dp), "state_topic": self.scheme.state(dev_id, sw_dp), "payload_on": "true", "payload_off": "false", "state_value_template": self.codec.value_template("light", dp_id=sw_dp)})
+                    payload.update({**self._cmd(dev_id, sw_dp, "command_topic", kind="bool"), "state_topic": self.scheme.state(dev_id, sw_dp), "payload_on": "true", "payload_off": "false", "state_value_template": self.codec.value_template("light", dp_id=sw_dp)})
                     consumed.add(sw_dp)
                 if tm_dp:
-                    payload.update({"color_temp_command_topic": self.scheme.command(dev_id, tm_dp), "color_temp_state_topic": self.scheme.state(dev_id, tm_dp), "color_temp_value_template": self.codec.value_template("light", dp_id=tm_dp)})
+                    payload.update({**self._cmd(dev_id, tm_dp, "color_temp_command_topic", kind="number", scale=dps[tm_dp]['meta'].get('scale', 0)), "color_temp_state_topic": self.scheme.state(dev_id, tm_dp), "color_temp_value_template": self.codec.value_template("light", dp_id=tm_dp)})
                     consumed.add(tm_dp)
                 results[self.scheme.discovery("light", dev_id, "led")] = payload
 
@@ -382,7 +420,10 @@ class DiscoveryGenerator:
                     payload["event_types"] = event_types + ["single_click", "double_click", "long_press"]
 
             if comp in ["binary_sensor", "switch"]: payload.update({"payload_on": "true", "payload_off": "false"})
-            if comp not in ['sensor', 'binary_sensor', 'event']: payload["command_topic"] = self.scheme.command(dev_id, d_id)
+            if comp not in ['sensor', 'binary_sensor', 'event']:
+                payload.update(self._cmd(dev_id, d_id, "command_topic",
+                                         kind=self._CMD_KIND.get(comp, "raw"),
+                                         scale=meta.get('scale', 0), val_map=meta.get('val_map')))
             results[self.scheme.discovery(comp, dev_id, code)] = payload
 
             # Delta DP `passive` companion: some devices report the increment on

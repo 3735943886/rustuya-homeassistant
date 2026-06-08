@@ -109,6 +109,55 @@ def build_value_template(comp: str, scale: int = 0,
     return "{{ %s }}" % inner
 
 
+# --- command (write) value encoding ---
+
+def _jinja_sq(s: str) -> str:
+    """Escape a string for use inside a single-quoted Jinja literal."""
+    return str(s).replace("\\", "\\\\").replace("'", "\\'")
+
+
+def build_command_value_expr(kind: str = "raw", scale: int = 0,
+                             val_map: Optional[Dict[str, Any]] = None,
+                             transform: Optional[str] = None) -> str:
+    """Jinja snippet (WITH its own JSON quoting) for the DP value HA must send.
+
+    This is the inverse of ``build_value_template``: scale multiplies (read
+    divides), and ``val_map`` is inverted (read maps device-raw -> friendly
+    label; write maps the chosen label back to the device-raw). ``value`` is
+    HA's command-template variable. The returned snippet is dropped verbatim
+    after ``"<dp>": `` inside the command payload, so each kind emits the right
+    JSON type/quoting itself.
+
+    kinds:
+      bool   -> ``{{ value }}`` (value is payload_on/off 'true'/'false' -> JSON literal)
+      number -> integer, scale-multiplied; ``transform`` can wrap it (e.g. invert)
+      enum   -> inverted val_map lookup, emitted as a quoted JSON string
+      string -> ``{{ value | tojson }}`` (self-quoting JSON string)
+      raw    -> the value as a quoted JSON string verbatim
+    """
+    if kind == "bool":
+        return "{{ value }}"
+    if kind == "number":
+        if scale and scale > 0:
+            expr = "(value | float * %d) | round(0) | int" % (10 ** scale)
+        else:
+            expr = "(value | float) | int"
+        if transform:
+            expr = transform % ("(%s)" % expr)
+        return "{{ %s }}" % expr
+    if kind == "enum" and val_map:
+        # Invert device-raw -> label into label -> device-raw (first raw wins for
+        # duplicate labels). Single-quoted so it nests inside the JSON template.
+        inv: Dict[str, str] = {}
+        for raw, label in val_map.items():
+            inv.setdefault(str(label), str(raw))
+        items = ", ".join("'%s': '%s'" % (_jinja_sq(k), _jinja_sq(v)) for k, v in inv.items())
+        return "\"{{ {%s}[value] | default(value) }}\"" % items
+    if kind == "string":
+        return "{{ value | tojson }}"
+    return "\"{{ value }}\""
+
+
 # --- TopicScheme ---
 
 @runtime_checkable
@@ -196,6 +245,9 @@ class PayloadCodec(Protocol):
                        passive_only: bool = False,
                        transform: Optional[str] = None) -> str: ...
     def availability_template(self) -> str: ...
+    def command_template(self, dev_id: str, dp_id: str, kind: str = "raw",
+                         scale: int = 0, val_map: Optional[Dict[str, Any]] = None,
+                         transform: Optional[str] = None) -> Optional[str]: ...
 
 
 class DefaultPayloadCodec:
@@ -215,6 +267,13 @@ class DefaultPayloadCodec:
                                     skip_active=not (active_only or passive_only),
                                     active_only=active_only, passive_only=passive_only,
                                     transform=transform)
+
+    def command_template(self, dev_id: str, dp_id: str, kind: str = "raw",
+                         scale: int = 0, val_map: Optional[Dict[str, Any]] = None,
+                         transform: Optional[str] = None) -> Optional[str]:
+        # Legacy/default layout puts the DP in the command topic, so HA writes a
+        # bare value and no template is needed (preserves the golden output).
+        return None
 
 
 class BridgePayloadCodec:
@@ -250,6 +309,32 @@ class BridgePayloadCodec:
                                     skip_active=(self._skip_active and not (active_only or passive_only)),
                                     active_only=active_only, passive_only=passive_only,
                                     transform=transform)
+
+    def command_template(self, dev_id: str, dp_id: str, kind: str = "raw",
+                         scale: int = 0, val_map: Optional[Dict[str, Any]] = None,
+                         transform: Optional[str] = None) -> Optional[str]:
+        """Build a Home Assistant ``command_template`` that emits the bridge's
+        ``set`` request JSON, carrying whatever the command topic does NOT.
+
+        Returns None when the command topic already encodes the DP
+        (``command_per_dp``): a bare value works there, so HA needs no template
+        (and the historical output is preserved). Otherwise the device id and DP
+        live only in the payload, so we emit e.g.::
+
+            {"action": "set", "id": "<dev>", "dps": {"7": {{ (value|float)|int }}}}
+
+        ``id``/``action`` are included only when the topic doesn't already carry
+        them (``{id}`` / ``{action}``)."""
+        if self.config.command_per_dp:
+            return None
+        parts = []
+        if not self.config.command_has_action:
+            parts.append('"action": "set"')
+        if not self.config.command_has_id:
+            parts.append('"id": %s' % json.dumps(str(dev_id)))
+        value_expr = build_command_value_expr(kind, scale, val_map, transform)
+        parts.append('"dps": {%s: %s}' % (json.dumps(str(dp_id)), value_expr))
+        return "{%s}" % ", ".join(parts)
 
 
 def scheme_for(config: BridgeConfig):

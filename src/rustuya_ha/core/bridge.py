@@ -154,6 +154,31 @@ class BridgeConfig:
         """True when each DP gets its own topic (event topic embeds ``{dp}``)."""
         return "{dp}" in self.event_topic
 
+    # --- command-topic shape (drives the write/command_template) ---
+    # A command published by HA reaches the bridge on ``command_topic``. The
+    # bridge can read the target device id / DP / action either from the TOPIC
+    # (placeholder captures) or from the JSON PAYLOAD. Whatever the topic does
+    # NOT encode must be carried in the payload — so these flags decide what a
+    # generated ``command_template`` has to include.
+    @property
+    def command_per_dp(self) -> bool:
+        """True when the DP is in the command topic (``{dp}``). Then a bare value
+        suffices (the bridge wraps it as ``{"dps": {<dp>: value}}``) and no
+        ``command_template`` is needed — the historical layout."""
+        return "{dp}" in self.command_topic
+
+    @property
+    def command_has_id(self) -> bool:
+        """True when the command topic carries the device id (``{id}``)."""
+        return "{id}" in self.command_topic
+
+    @property
+    def command_has_action(self) -> bool:
+        """True when the command topic carries the action (``{action}``); the
+        bridge's request enum is tagged by ``action``, so when this is False the
+        payload must include ``"action": "set"``."""
+        return "{action}" in self.command_topic
+
     def value_path(self) -> Optional[List[Any]]:
         """Path to the per-DP value (``{value}``) in the payload template; for
         multi-DP, the path to the dps dict (``{dps}``)."""
