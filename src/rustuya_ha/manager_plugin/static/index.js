@@ -1081,7 +1081,11 @@ function renderConverters(ctx, view, rerender) {
 
 export async function mount(rootEl, ctx) {
   rootEl.innerHTML = "";
-  const container = el("div", "p-2");
+  // No horizontal padding: the manager's <main> already supplies px-4, and its
+  // own device view sits flush to that edge. A px here would inset the tab's
+  // content past the manager's screens (the reported extra left/right margin),
+  // so keep only vertical padding.
+  const container = el("div", "py-2");
   const heading = el("div", "flex items-center gap-2 mb-3");
   heading.appendChild(el("h2", "text-base font-semibold", "Home Assistant Discovery"));
   container.appendChild(heading);
