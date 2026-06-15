@@ -750,6 +750,14 @@ function deviceCard(ctx, d, view, rerender) {
   if (expandable) {
     card.addEventListener("click", (ev) => {
       if (ev.target.closest("button, input, a")) return;
+      // Skip the toggle when the user is finishing a drag-to-select inside the
+      // card: dragging across the topic/diff text fires a click on mouseup,
+      // which would collapse the card and drop the selection before they can
+      // copy it. The browser sets the selection on mouseup *before* the click,
+      // so a non-collapsed selection anchored in this card means "selecting,
+      // not tapping".
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed && card.contains(sel.anchorNode)) return;
       toggle();
     });
   }
