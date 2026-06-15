@@ -181,6 +181,32 @@ function filterPill(label, count, on, color, onClick) {
 // toggles every category at once. Tabs with 0 fade so the eye lands on the
 // actionable ones. `view.filters` is the set of enabled category keys. The bulk
 // actions (Publish / Restore) ride the right end of this same row.
+// Title row with the bulk actions (Publish / Restore) right-aligned next to the
+// heading. Lives in `body` (rebuilt each render) so Publish's disabled state
+// tracks the current data. `data` may be null while waiting — show title only.
+function renderHeader(ctx, data) {
+  const head = el("div", "flex items-center gap-2 mb-3");
+  head.appendChild(el("h2", "text-base font-semibold", "Home Assistant Discovery"));
+  if (!data) return head;
+
+  const devices = data.devices || [];
+  const syncIds = devices.filter((d) => NEEDS_SYNC.has(d.category)).map((d) => d.id);
+  const orphanTopics = devices.filter((d) => d.category === "orphans").flatMap((d) => d.topics || []);
+  const actionable = syncIds.length + orphanTopics.length;
+  const actions = el("span", "ml-auto flex items-center gap-1.5");
+  const pub = barBtn(
+    "Publish",
+    "slate", // neutral like Restore — a colored button read as the "Missing" (sky) category
+    "Review by category, then publish / clear orphans",
+    () => openApplyModal(ctx, data, { publish: true, clear: true }),
+  );
+  pub.disabled = actionable === 0;
+  actions.appendChild(pub);
+  actions.appendChild(barBtn("Restore", "slate", "Restore from a backup", () => openRestoreModal(ctx)));
+  head.appendChild(actions);
+  return head;
+}
+
 function renderFilterTabs(ctx, data, view, rerender) {
   const wrap = el("div", "flex flex-wrap gap-1 mb-3 text-xs items-center");
   const counts = data.counts || {};
@@ -207,23 +233,6 @@ function renderFilterTabs(ctx, data, view, rerender) {
     pill.title = on ? `hide ${label}` : `show ${label}`;
     wrap.appendChild(pill);
   }
-
-  // Right-aligned bulk actions on the same row.
-  const devices = data.devices || [];
-  const syncIds = devices.filter((d) => NEEDS_SYNC.has(d.category)).map((d) => d.id);
-  const orphanTopics = devices.filter((d) => d.category === "orphans").flatMap((d) => d.topics || []);
-  const actionable = syncIds.length + orphanTopics.length;
-  const actions = el("span", "ml-auto flex items-center gap-1.5");
-  const pub = barBtn(
-    "Publish",
-    "slate", // neutral like Restore — a colored button read as the "Missing" (sky) category
-    "Review by category, then publish / clear orphans",
-    () => openApplyModal(ctx, data, { publish: true, clear: true }),
-  );
-  pub.disabled = actionable === 0;
-  actions.appendChild(pub);
-  actions.appendChild(barBtn("Restore", "slate", "Restore from a backup", () => openRestoreModal(ctx)));
-  wrap.appendChild(actions);
   return wrap;
 }
 
@@ -280,18 +289,6 @@ function renderControls(data, view, rerender) {
     rerender();
   });
   bar.appendChild(sort);
-
-  const allOn = ALL_CAT_KEYS.every((k) => view.filters.has(k));
-  if (!allOn || view.search) {
-    bar.appendChild(
-      btn("clear filters", BTN_GHOST, () => {
-        view.filters = new Set(ALL_CAT_KEYS);
-        view.search = "";
-        persistView(view);
-        rerender();
-      }),
-    );
-  }
   return bar;
 }
 
@@ -1086,9 +1083,8 @@ export async function mount(rootEl, ctx) {
   // content past the manager's screens (the reported extra left/right margin),
   // so keep only vertical padding.
   const container = el("div", "py-2");
-  const heading = el("div", "flex items-center gap-2 mb-3");
-  heading.appendChild(el("h2", "text-base font-semibold", "Home Assistant Discovery"));
-  container.appendChild(heading);
+  // Title + bulk actions are rendered inside `body` (see renderHeader) so the
+  // Publish button's enabled state tracks live data.
   const body = el("div");
   container.appendChild(body);
   rootEl.appendChild(container);
@@ -1112,14 +1108,16 @@ export async function mount(rootEl, ctx) {
     const selE = keep ? active.selectionEnd : null;
 
     body.innerHTML = "";
+    body.appendChild(renderHeader(ctx, data));
     if (!data) {
       body.appendChild(
         el("div", "text-sm text-slate-500 py-8 text-center", "Waiting for discovery state…"),
       );
       return;
     }
-    body.appendChild(renderFilterTabs(ctx, data, view, render));
+    // Search + sort first, then the category filter pills below them.
     body.appendChild(renderControls(data, view, render));
+    body.appendChild(renderFilterTabs(ctx, data, view, render));
     body.appendChild(renderGrid(ctx, data, view, render));
     const errs = renderErrors(data);
     if (errs) body.appendChild(errs);
