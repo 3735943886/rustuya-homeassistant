@@ -11,6 +11,12 @@ name: publish
 # How to release:
 #   - Rehearse on TestPyPI:  Actions -> publish -> "Run workflow" (workflow_dispatch)
 #   - Release to PyPI:       push a tag  v0.0.1  (must match pyproject version)
+#
+# A tag push also attaches the built wheel + sdist to a GitHub Release (the
+# `release` job), so the plugin can be grabbed without pip/PyPI — handy for the
+# Docker drop-in: download the wheel from the Releases page and unzip just the
+# `rustuya_ha/` package into the manager's /data/plugins. rc* tags are marked as
+# pre-releases.
 
 on:
   push:
@@ -93,3 +99,25 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           skip-existing: true
+
+  release:
+    # Attach the built artifacts to a GitHub Release on tag push, so the package
+    # is downloadable without pip/PyPI (e.g. for the manager Docker drop-in).
+    # Independent of `pypi` — a PyPI hiccup must not block the GitHub Release,
+    # and vice versa; both just consume the same `dist` artifact from `build`.
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # create the release + upload assets
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          # rc / a / b / dev tags are pre-releases; a bare vX.Y.Z is a full release.
+          prerelease: ${{ contains(github.ref_name, 'rc') || contains(github.ref_name, 'a') || contains(github.ref_name, 'b') || contains(github.ref_name, 'dev') }}
+          generate_release_notes: true
