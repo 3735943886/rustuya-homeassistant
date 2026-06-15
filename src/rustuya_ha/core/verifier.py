@@ -2,6 +2,8 @@
 categorize each device. Category-filter helpers live here too."""
 from typing import Dict, List
 
+from .scheme import DEFAULT_MANUFACTURER
+
 CATEGORY_ALIASES = {
     "mismatched": "mismatched_payload",
     "partial": "partially_missing",
@@ -51,7 +53,8 @@ class DiscoveryVerifier:
         working_topics = set(mqtt_messages.keys())
         for topic in list(working_topics):
             payload = mqtt_messages[topic]["payload"]
-            dev_id = payload.get("device", {}).get("identifiers", ["unknown"])[0]
+            device = payload.get("device") or {}
+            dev_id = (device.get("identifiers") or ["unknown"])[0]
 
             if topic in expected_topics:
                 expected = expected_topics[topic]
@@ -62,7 +65,18 @@ class DiscoveryVerifier:
                         "topic": topic, "actual": payload, "expected": expected["payload"]
                     })
                 working_topics.remove(topic)
-            elif dev_id in device_map:
+                continue
+
+            # Ownership scope: discovery *we* publish carries our manufacturer
+            # marker. Configs from other MQTT-discovery integrations (zigbee2mqtt,
+            # Tasmota, ESPHome, hand-published, …) share the broker but are not
+            # ours to flag or clear — drop them from scope entirely so they're
+            # never classified as unexpected/orphan nor reachable by clear.
+            if device.get("manufacturer") != DEFAULT_MANUFACTURER:
+                working_topics.remove(topic)
+                continue
+
+            if dev_id in device_map:
                 device_map[dev_id]["unexpected"].append(topic)
                 working_topics.remove(topic)
 
