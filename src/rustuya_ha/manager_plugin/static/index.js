@@ -12,14 +12,17 @@
 
 // [key, label, color] — color drives the filter-tab pill and must match the
 // card's left-stripe color (CAT_STYLE) so a category reads as one hue.
+// Filter-pill order mirrors the manager's default (problems first, healthy
+// last): missing → orphan → mismatch → partial → unexpected → no-DP → perfect.
+// Only affects pill display order; status sort ranking lives in CAT_ORDER.
 const CATEGORIES = [
-  ["perfect", "Perfect", "emerald"],
+  ["pure_missing", "Missing", "sky"],
+  ["orphans", "Orphans", "rose"],
   ["mismatched_payload", "Mismatched", "amber"],
   ["partially_missing", "Partial", "yellow"],
-  ["pure_missing", "Missing", "sky"],
   ["unexpected_topics", "Unexpected", "purple"],
   ["no_dp_config", "No DP config", "slate"],
-  ["orphans", "Orphans", "rose"],
+  ["perfect", "Perfect", "emerald"],
 ];
 const LABEL = Object.fromEntries(CATEGORIES.map(([k, l]) => [k, l]));
 
