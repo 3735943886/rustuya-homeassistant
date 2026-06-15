@@ -64,6 +64,59 @@ narrows by verifier category (see `rustuya-ha -h`).
 | Device list | `--devices PATH` | `RUSTUYA_DEVICES` | `tuyadevices.json` |
 | Custom converters | `--converters PATH` | `RUSTUYA_CONVERTERS` | `./custom_converters.json` |
 
+## As a rustuya-manager plugin (Web UI / Docker)
+
+This package is also a [rustuya-manager](https://github.com/3735943886/rustuya-manager)
+plugin: the package root exposes a `register(ctx)` callable, so when the manager
+sees it an **"HA Discovery" tab** appears in its Web UI (live status, diff,
+publish/clear/restore, converter editing). The dependency arrow is one-way —
+rustuya-ha plugs **into** the manager, never the reverse.
+
+There are two ways to load it; pick by how the manager is installed.
+
+**Installed manager (pip):** install with the `manager` extra and the
+entry-point is discovered automatically — nothing else to do.
+
+```bash
+pip install --pre 'rustuya-homeassistant[manager]'
+rustuya-manager --web        # "HA Discovery" tab now present
+```
+
+**Dockerized manager (drop-in, no pip):** the manager image defaults
+`PLUGIN_DIR=/data/plugins`, and `/data` is your existing data volume (the one
+holding `config.json` / `tuyadevices.json`). Drop the `rustuya_ha` **package**
+into `plugins/` there and restart — no image rebuild, no pip install inside the
+container. The runtime dependency (`paho-mqtt`) is already provided by the
+manager image's `aiomqtt`. Get the package one of these ways:
+
+```bash
+cd /your/manager/data && mkdir -p plugins
+
+# (a) From a GitHub Release — no pip, no PyPI (wheel attached on each v* tag).
+#     The asset filename carries the version, so grab it from the Releases page
+#     ( https://github.com/3735943886/rustuya-homeassistant/releases ), or pin a
+#     version directly:
+curl -L -O https://github.com/3735943886/rustuya-homeassistant/releases/download/v0.1.0/rustuya_homeassistant-0.1.0-py3-none-any.whl
+cd plugins && unzip -o ../rustuya_homeassistant-*.whl 'rustuya_ha/*'
+
+# (b) Straight from source (no release needed — it's just a directory):
+curl -L https://github.com/3735943886/rustuya-homeassistant/archive/refs/heads/master.tar.gz \
+  | tar xz --strip-components=2 -C plugins '*/src/rustuya_ha'
+
+# (c) From a checkout:
+cp -r src/rustuya_ha /your/manager/data/plugins/
+```
+
+Then restart the container (plugins load once at boot) and the tab appears:
+
+```bash
+docker restart <manager-container>     # log: loaded dir plugin 'rustuya_ha' from /data/plugins
+```
+
+> Loading code from `/data/plugins` runs it in-process — same trust level as
+> installing a package. Pin a version by swapping `master` / `latest` for a tag
+> (e.g. `refs/tags/v0.1.0`).
+
 ## Architecture
 
 ```
