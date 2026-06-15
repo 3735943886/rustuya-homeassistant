@@ -892,7 +892,7 @@ async function loadConverters(ctx, view, rerender) {
     const keep =
       view.conv.selected === ALL_CONV || (view.conv.selected && pids.includes(view.conv.selected))
         ? view.conv.selected
-        : pids[0] || ALL_CONV;
+        : ALL_CONV; // default to the whole-file ("All") view; a stale per-product pick also falls back here
     selectProduct(view, keep);
   } catch (e) {
     ctx.toast && ctx.toast(`converters: ${e.message}`, "error");
