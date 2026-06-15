@@ -101,7 +101,7 @@ cd plugins && unzip -o ../rustuya_homeassistant-*.whl 'rustuya_ha/*'
 
 # (b) Straight from source (no release needed — it's just a directory):
 curl -L https://github.com/3735943886/rustuya-homeassistant/archive/refs/heads/master.tar.gz \
-  | tar xz --strip-components=2 -C plugins '*/src/rustuya_ha'
+  | tar xz -C plugins --wildcards --strip-components=2 '*/src/rustuya_ha/*'
 
 # (c) From a checkout:
 cp -r src/rustuya_ha /your/manager/data/plugins/
