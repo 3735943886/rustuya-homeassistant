@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rustuya-homeassistant"
-version = "0.0.1rc3"
+version = "0.0.1rc4"
 description = "Generate & sync Home Assistant MQTT discovery for rustuya-bridge Tuya devices"
 readme = "README.md"
 requires-python = ">=3.9"

@@ -13,10 +13,11 @@ name: publish
 #   - Release to PyPI:       push a tag  v0.0.1  (must match pyproject version)
 #
 # A tag push also attaches the built wheel + sdist to a GitHub Release (the
-# `release` job), so the plugin can be grabbed without pip/PyPI — handy for the
-# Docker drop-in: download the wheel from the Releases page and unzip just the
-# `rustuya_ha/` package into the manager's /data/plugins. rc* tags are marked as
-# pre-releases.
+# `release` job), plus a `rustuya_ha-<version>-dropin.zip` — a reproducible zip
+# of just the importable `rustuya_ha/` package, built by scripts/build_dropin.py.
+# That is the exact artifact rustuya-manager's plugin catalog downloads and
+# SHA-256-verifies before unpacking into /data/plugins; the catalog entry's url
+# points at this release asset. rc* tags are marked as pre-releases.
 
 on:
   push:
@@ -66,6 +67,18 @@ jobs:
         with:
           name: dist
           path: dist/
+      - name: Build the drop-in plugin zip (for the rustuya-manager catalog)
+        # Reproducible (pinned timestamps/order, ZIP_STORED): the manager rejects
+        # any artifact whose hash differs from its catalog entry, so these bytes
+        # must match what scripts/build_dropin.py produced when plugins.json was
+        # pinned. The printed sha256 is the value that lives in that catalog.
+        # Built into its own dir/artifact (not dist/) so it never reaches the
+        # PyPI upload, which would reject a non-wheel/sdist zip.
+        run: python scripts/build_dropin.py --outdir dropin
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dropin
+          path: dropin/
 
   testpypi:
     needs: build
@@ -115,9 +128,15 @@ jobs:
         with:
           name: dist
           path: dist/
+      - uses: actions/download-artifact@v8
+        with:
+          name: dropin
+          path: dropin/
       - uses: softprops/action-gh-release@v2
         with:
-          files: dist/*
+          files: |
+            dist/*
+            dropin/*
           # rc / a / b / dev tags are pre-releases; a bare vX.Y.Z is a full release.
           prerelease: ${{ contains(github.ref_name, 'rc') || contains(github.ref_name, 'a') || contains(github.ref_name, 'b') || contains(github.ref_name, 'dev') }}
           generate_release_notes: true
