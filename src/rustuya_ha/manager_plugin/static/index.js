@@ -10,19 +10,18 @@
 // its plan via a dry-run, confirms, then executes — the grid refreshes itself
 // from the namespace push (broker echo) afterwards.
 
-// ── i18n (self-contained, file-based) ─────────────────────────────────────
+// ── i18n (self-contained, file-based; follows the shell's language) ───────
 // Translations live in sibling JSON catalogs under ./locales/: en.json is the
-// source of truth + fallback, and index.json lists the selectable languages
-// with their display names. They're fetched relative to this module's URL, so
-// the plugin owns its languages outright — adding one is a dropped xx.json plus
-// a line in index.json, no manager change. The shell's language seeds the
-// initial pick (ctx.getLang) and a global switch re-syncs us (ctx.onLangChange),
-// but the in-tab picker can override it; whichever was touched last is persisted.
-const LS_LANG = "rustuya-ha.discovery.lang";
+// source of truth + fallback, index.json lists which languages the plugin ships.
+// They're fetched relative to this module's URL, so the plugin owns its
+// languages outright — adding one is a dropped xx.json plus a line in index.json.
+// There is no in-tab picker: the language is the manager shell's global choice
+// (ctx.getLang at mount, ctx.onLangChange on switch). If the shell's language is
+// one we ship we use it, otherwise we fall back to English.
 const localeUrl = (name) => new URL(`./locales/${name}.json`, import.meta.url).href;
 
 // Loaded dictionaries by code (en present once boot completes) + the manifest's
-// language list. `lang` is the active code.
+// list of languages we ship. `lang` is the active code.
 const DICTS = {};
 let LOCALES = [{ code: "en", name: "English" }];
 let lang = "en";
@@ -46,7 +45,7 @@ async function loadDict(code) {
 }
 
 // Boot i18n: read the manifest (best-effort) and always load en as the fallback
-// layer. Returns the available-language list for the picker.
+// layer. Returns the list of languages we ship.
 async function initLocales() {
   try {
     const m = await fetchJson(localeUrl("index"));
@@ -69,16 +68,13 @@ function t(key, vars) {
   return s;
 }
 
-// Switch active language: ensure its dict is loaded, then set + persist. Returns
-// false (a no-op) if the code isn't one the manifest offers. Callers re-render.
-async function setPluginLang(code) {
-  if (!LOCALES.some((l) => l.code === code)) return false;
-  await loadDict(code);
-  lang = code;
-  try {
-    localStorage.setItem(LS_LANG, code);
-  } catch {}
-  return true;
+// Adopt the shell's language `code`: use it if we ship it, else fall back to
+// English. Loads the target dictionary, then sets the active language. Callers
+// re-render afterward.
+async function applyLang(code) {
+  const target = LOCALES.some((l) => l.code === code) ? code : "en";
+  await loadDict(target);
+  lang = target;
 }
 // [key, color] — color drives the filter-tab pill and must match the card's
 // left-stripe color (CAT_STYLE) so a category reads as one hue. Labels come from
@@ -366,23 +362,6 @@ function renderControls(data, view, rerender) {
     rerender();
   });
   bar.appendChild(sort);
-
-  // Language picker — driven by the plugin's own ./locales catalogs (seeded from
-  // the shell's language, overridable here). Shown only when >1 is offered.
-  if (LOCALES.length > 1) {
-    const langSel = el("select", SELECT_CLS);
-    langSel.title = t("controls.language");
-    for (const l of LOCALES) {
-      const o = el("option", null, l.name);
-      o.value = l.code;
-      if (l.code === lang) o.selected = true;
-      langSel.appendChild(o);
-    }
-    langSel.addEventListener("change", async () => {
-      if (await setPluginLang(langSel.value)) rerender();
-    });
-    bar.appendChild(langSel);
-  }
   return bar;
 }
 
@@ -1191,20 +1170,11 @@ export async function mount(rootEl, ctx) {
   container.appendChild(body);
   rootEl.appendChild(container);
 
-  // Boot translations before the first paint so every label resolves. Then pick
-  // the initial language: a previously saved in-tab choice wins, else the shell's
-  // current language (ctx.getLang, rc49+), else the manifest default — each only
-  // if the plugin actually ships it. The seed isn't persisted, so without an
-  // explicit pick the plugin keeps following the shell.
+  // Boot translations before the first paint so every label resolves, then adopt
+  // the shell's current language (ctx.getLang) — applyLang falls back to English
+  // if we don't ship it. getLang exists from manager rc48; a still-older host
+  // just leaves us on English.
   await initLocales();
-  const offered = (c) => !!c && LOCALES.some((l) => l.code === c);
-  const saved = (() => {
-    try {
-      return localStorage.getItem(LS_LANG);
-    } catch {
-      return null;
-    }
-  })();
   const host = (() => {
     try {
       return ctx.getLang && ctx.getLang();
@@ -1212,8 +1182,7 @@ export async function mount(rootEl, ctx) {
       return null;
     }
   })();
-  lang = (offered(saved) && saved) || (offered(host) && host) || LOCALES[0].code;
-  await loadDict(lang);
+  await applyLang(host || "en");
 
   // View state persists across re-renders (live pushes + filter/sort/expand).
   // `filters` (category multi-select) and `sort` are seeded from localStorage so
@@ -1290,13 +1259,14 @@ export async function mount(rootEl, ctx) {
     if (d) paint(d);
   });
 
-  // Re-sync to the shell's language when it switches (rc49+). applyDom() only
+  // Follow the shell's language when it switches (manager rc49+). applyDom() only
   // reaches [data-i18n] nodes, so this imperatively-built UI re-renders itself.
-  // setPluginLang loads + persists the new code; if the plugin doesn't ship it,
-  // it's a no-op and we keep the current language. Optional — an older manager
-  // never fires it (language then changes only via the in-tab picker / re-enter).
+  // applyLang adopts the new code or falls back to English if we don't ship it.
+  // Optional — an older manager never fires it (language then only updates on a
+  // tab re-enter, picking up the shell's language via getLang at mount).
   const unsubLang = ctx.onLangChange?.(async (code) => {
-    if (await setPluginLang(code)) render();
+    await applyLang(code);
+    render();
   });
   return () => {
     unsub && unsub();
