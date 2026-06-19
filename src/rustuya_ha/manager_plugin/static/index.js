@@ -10,21 +10,244 @@
 // its plan via a dry-run, confirms, then executes — the grid refreshes itself
 // from the namespace push (broker echo) afterwards.
 
-// [key, label, color] — color drives the filter-tab pill and must match the
-// card's left-stripe color (CAT_STYLE) so a category reads as one hue.
-// Filter-pill order mirrors the manager's default (problems first, healthy
-// last): missing → orphan → mismatch → partial → unexpected → no-DP → perfect.
-// Only affects pill display order; status sort ranking lives in CAT_ORDER.
+// ── i18n (self-contained) ─────────────────────────────────────────────────
+// The plugin ships its own dictionaries and re-renders on a language switch via
+// ctx.onLangChange, so it never depends on the manager merging plugin keys. On
+// an older manager that lacks the hooks it still localizes to the saved language
+// at mount (read from the same localStorage key the shell persists); only live
+// switching is unavailable there. Keys mirror the manager's {placeholder} fill.
+const STR = {
+  en: {
+    "title": "Home Assistant Discovery",
+    "cat.pure_missing": "Missing",
+    "cat.orphans": "Orphans",
+    "cat.mismatched_payload": "Mismatched",
+    "cat.partially_missing": "Partial",
+    "cat.unexpected_topics": "Unexpected",
+    "cat.no_dp_config": "No DP config",
+    "cat.perfect": "Perfect",
+    "action.publish": "publish",
+    "action.clear": "clear",
+    "action.restore": "restore",
+    "action.apply": "apply",
+    "action.save": "save",
+    "action.saveAll": "save all",
+    "action.delete": "delete",
+    "action.preview": "preview",
+    "header.publish": "Publish",
+    "header.publishTitle": "Review by category, then publish / clear orphans",
+    "header.restore": "Restore",
+    "header.restoreTitle": "Restore from a backup",
+    "plan.publish": "Publish {devices} device(s): {configs} config(s), clear {stale} stale.\n{messages} retained MQTT message(s).",
+    "plan.genErrors": "\n⚠ {count} generator error(s).",
+    "plan.clear": "Clear {messages} retained topic(s) across {devices} device(s).\nThis removes them from Home Assistant.",
+    "plan.restore": "Restore from {from}:\nre-publish {set} topic(s), clear {clear} added since.",
+    "plan.lastBackup": "last backup",
+    "plan.messages": "{count} message(s).",
+    "confirm.title": "{action} — confirm",
+    "toast.nothingToDo": "nothing to do",
+    "toast.done": "done",
+    "toast.backupSuffix": " · backup saved",
+    "controls.searchPlaceholder": "search name / id…",
+    "controls.clearSearch": "Clear",
+    "controls.sortTitle": "Sort devices",
+    "controls.sortBy": "sort by",
+    "sort.category": "category",
+    "sort.name": "name",
+    "sort.id": "id",
+    "filter.all": "all",
+    "filter.hide": "hide {label}",
+    "filter.show": "show {label}",
+    "modal.titleBoth": "Publish & clear orphans",
+    "modal.titleClear": "Clear orphans",
+    "modal.titlePublish": "Publish needing sync",
+    "modal.apply": "Apply",
+    "modal.applyN": "Apply {count}",
+    "modal.applying": "Applying…",
+    "modal.selectAll": "select all",
+    "modal.applied": "Applied.",
+    "common.close": "Close",
+    "common.cancel": "Cancel",
+    "common.done": "Done",
+    "common.save": "Save",
+    "common.loading": "loading…",
+    "common.error": "Error: {error}",
+    "status.pending": "pending",
+    "restore.noBackups": "no backups found",
+    "restore.title": "Restore backup",
+    "restore.restore": "Restore",
+    "restore.showing": "Showing newest {shown} of {total} backups.",
+    "restore.latest": "latest",
+    "restore.preview": "Re-publish {set}, clear {clear} — Confirm to apply.",
+    "restore.confirm": "Confirm restore",
+    "restore.restored": "Restored.",
+    "detail.missing": "missing",
+    "detail.unexpected": "unexpected",
+    "card.metricTitle": "matched / expected entities",
+    "card.clearTopics": "Clear retained topic(s)",
+    "card.publish": "Publish",
+    "card.clear": "Clear",
+    "card.collapse": "Collapse",
+    "card.expand": "Expand",
+    "card.orphan": "(orphan)",
+    "grid.empty": "No devices to show yet.",
+    "grid.noMatch": "No devices match the current filter.",
+    "grid.waiting": "Waiting for discovery state…",
+    "errors.title": "Generator errors ({count})",
+    "conv.section": "Custom converters",
+    "conv.label": "converters",
+    "conv.all": "All (full JSON)",
+    "conv.product": "{pid} · {count} dev",
+    "conv.saveAllTitle": "converters — save all",
+    "conv.saveAllMsg": "Replace the entire converters file with this JSON?\nThis changes what Publish emits for every overridden product.",
+    "conv.savedAll": "converters saved ({count})",
+    "conv.deleteMsg": "Delete the override for {pid}?",
+    "conv.saveMsg": "Save the override for {pid}?\nThis changes what Publish emits for its device(s).",
+    "conv.actionTitle": "converter {action}",
+    "conv.deleted": "converter deleted",
+    "conv.saved": "converter saved",
+    "conv.previewTitle": "Preview — {pid} ({count} device(s))",
+    "conv.previewDevice": "{name} ({id}) — {count} topic(s) · {source}",
+    "conv.previewError": "{name} ({id}): {error}",
+    "conv.phAll": '{"<product_id>": {"model": "...", "dp_meta": { ... }}, ...}  — the whole converters file',
+    "conv.phOne": '{"model": "...", "dp_meta": { "1": { ... } }}  — empty or "null" deletes',
+    "conv.preview": "Preview",
+    "conv.deleteOverride": "Delete override",
+    "conv.savesTo": "saves to {path}",
+    "conv.invalidJson": "invalid JSON",
+  },
+  ko: {
+    "title": "Home Assistant 디스커버리",
+    "cat.pure_missing": "누락",
+    "cat.orphans": "고아",
+    "cat.mismatched_payload": "불일치",
+    "cat.partially_missing": "부분누락",
+    "cat.unexpected_topics": "예상밖",
+    "cat.no_dp_config": "DP 설정 없음",
+    "cat.perfect": "완벽",
+    "action.publish": "발행",
+    "action.clear": "제거",
+    "action.restore": "복원",
+    "action.apply": "적용",
+    "action.save": "저장",
+    "action.saveAll": "전체 저장",
+    "action.delete": "삭제",
+    "action.preview": "미리보기",
+    "header.publish": "발행",
+    "header.publishTitle": "카테고리별로 검토 후 발행 / 고아 제거",
+    "header.restore": "복원",
+    "header.restoreTitle": "백업에서 복원",
+    "plan.publish": "기기 {devices}개 발행: 설정 {configs}개, 오래된 항목 {stale}개 제거.\n유지(retained) MQTT 메시지 {messages}개.",
+    "plan.genErrors": "\n⚠ 제너레이터 오류 {count}개.",
+    "plan.clear": "기기 {devices}개에서 유지 토픽 {messages}개 제거.\nHome Assistant에서 사라집니다.",
+    "plan.restore": "{from}에서 복원:\n토픽 {set}개 재발행, 이후 추가된 {clear}개 제거.",
+    "plan.lastBackup": "마지막 백업",
+    "plan.messages": "메시지 {count}개.",
+    "confirm.title": "{action} — 확인",
+    "toast.nothingToDo": "할 작업 없음",
+    "toast.done": "완료",
+    "toast.backupSuffix": " · 백업됨",
+    "controls.searchPlaceholder": "이름 / ID 검색…",
+    "controls.clearSearch": "지우기",
+    "controls.sortTitle": "기기 정렬",
+    "controls.sortBy": "정렬 기준",
+    "sort.category": "카테고리",
+    "sort.name": "이름",
+    "sort.id": "ID",
+    "filter.all": "전체",
+    "filter.hide": "{label} 숨기기",
+    "filter.show": "{label} 보기",
+    "modal.titleBoth": "발행 및 고아 제거",
+    "modal.titleClear": "고아 제거",
+    "modal.titlePublish": "동기화 필요 발행",
+    "modal.apply": "적용",
+    "modal.applyN": "{count}개 적용",
+    "modal.applying": "적용 중…",
+    "modal.selectAll": "전체 선택",
+    "modal.applied": "적용됨.",
+    "common.close": "닫기",
+    "common.cancel": "취소",
+    "common.done": "완료",
+    "common.save": "저장",
+    "common.loading": "불러오는 중…",
+    "common.error": "오류: {error}",
+    "status.pending": "대기",
+    "restore.noBackups": "백업 없음",
+    "restore.title": "백업 복원",
+    "restore.restore": "복원",
+    "restore.showing": "최근 {shown}개 표시 (전체 {total}개).",
+    "restore.latest": "최신",
+    "restore.preview": "{set}개 재발행, {clear}개 제거 — 확인 시 적용.",
+    "restore.confirm": "복원 확인",
+    "restore.restored": "복원됨.",
+    "detail.missing": "누락",
+    "detail.unexpected": "예상밖",
+    "card.metricTitle": "일치 / 예상 엔티티",
+    "card.clearTopics": "유지 토픽 제거",
+    "card.publish": "발행",
+    "card.clear": "제거",
+    "card.collapse": "접기",
+    "card.expand": "펼치기",
+    "card.orphan": "(고아)",
+    "grid.empty": "표시할 기기가 아직 없습니다.",
+    "grid.noMatch": "현재 필터에 맞는 기기가 없습니다.",
+    "grid.waiting": "디스커버리 상태 대기 중…",
+    "errors.title": "제너레이터 오류 ({count})",
+    "conv.section": "커스텀 컨버터",
+    "conv.label": "컨버터",
+    "conv.all": "전체 (전체 JSON)",
+    "conv.product": "{pid} · 기기 {count}개",
+    "conv.saveAllTitle": "컨버터 — 전체 저장",
+    "conv.saveAllMsg": "컨버터 파일 전체를 이 JSON으로 교체할까요?\n오버라이드된 모든 제품의 발행 결과가 바뀝니다.",
+    "conv.savedAll": "컨버터 저장됨 ({count})",
+    "conv.deleteMsg": "{pid} 오버라이드를 삭제할까요?",
+    "conv.saveMsg": "{pid} 오버라이드를 저장할까요?\n해당 기기의 발행 결과가 바뀝니다.",
+    "conv.actionTitle": "컨버터 {action}",
+    "conv.deleted": "컨버터 삭제됨",
+    "conv.saved": "컨버터 저장됨",
+    "conv.previewTitle": "미리보기 — {pid} (기기 {count}개)",
+    "conv.previewDevice": "{name} ({id}) — 토픽 {count}개 · {source}",
+    "conv.previewError": "{name} ({id}): {error}",
+    "conv.phAll": '{"<product_id>": {"model": "...", "dp_meta": { ... }}, ...}  — 전체 컨버터 파일',
+    "conv.phOne": '{"model": "...", "dp_meta": { "1": { ... } }}  — 비우거나 "null"이면 삭제',
+    "conv.preview": "미리보기",
+    "conv.deleteOverride": "오버라이드 삭제",
+    "conv.savesTo": "저장 위치: {path}",
+    "conv.invalidJson": "잘못된 JSON",
+  },
+};
+
+// Active language; set in mount() from ctx.getLang()/localStorage. Mutable so a
+// language switch (ctx.onLangChange → re-render) picks up the new dictionary.
+let lang = "en";
+
+// Translate `key`, filling {name} placeholders from `vars`. Active locale →
+// English fallback → the key itself, mirroring the manager's resolver.
+function t(key, vars) {
+  let s = (STR[lang] && STR[lang][key]) ?? STR.en[key] ?? key;
+  if (vars) {
+    s = s.replace(/\{(\w+)\}/g, (m, name) => (name in vars ? String(vars[name]) : m));
+  }
+  return s;
+}
+
+// [key, color] — color drives the filter-tab pill and must match the card's
+// left-stripe color (CAT_STYLE) so a category reads as one hue. Labels come from
+// t("cat.<key>"). Filter-pill order mirrors the manager's default (problems
+// first, healthy last): missing → orphan → mismatch → partial → unexpected →
+// no-DP → perfect. Only affects pill display order; status sort ranking lives in
+// CAT_ORDER.
 const CATEGORIES = [
-  ["pure_missing", "Missing", "sky"],
-  ["orphans", "Orphans", "rose"],
-  ["mismatched_payload", "Mismatched", "amber"],
-  ["partially_missing", "Partial", "yellow"],
-  ["unexpected_topics", "Unexpected", "purple"],
-  ["no_dp_config", "No DP config", "slate"],
-  ["perfect", "Perfect", "emerald"],
+  ["pure_missing", "sky"],
+  ["orphans", "rose"],
+  ["mismatched_payload", "amber"],
+  ["partially_missing", "yellow"],
+  ["unexpected_topics", "purple"],
+  ["no_dp_config", "slate"],
+  ["perfect", "emerald"],
 ];
-const LABEL = Object.fromEntries(CATEGORIES.map(([k, l]) => [k, l]));
+// Category label, resolved live so a language switch re-localizes it.
+const catLabel = (key) => t("cat." + key);
 
 function el(tag, cls, text) {
   const e = document.createElement(tag);
@@ -77,22 +300,23 @@ function describePlan(action, plan) {
   if (action === "publish") {
     const pub = (plan.per_device || []).reduce((n, p) => n + (p.publish || 0), 0);
     const clr = (plan.per_device || []).reduce((n, p) => n + (p.clear || 0), 0);
-    let m = `Publish ${plan.per_device?.length || 0} device(s): ${pub} config(s), clear ${clr} stale.\n${plan.msg_count} retained MQTT message(s).`;
-    if (plan.errors?.length) m += `\n⚠ ${plan.errors.length} generator error(s).`;
+    let m = t("plan.publish", { devices: plan.per_device?.length || 0, configs: pub, stale: clr, messages: plan.msg_count });
+    if (plan.errors?.length) m += t("plan.genErrors", { count: plan.errors.length });
     return m;
   }
   if (action === "clear") {
-    return `Clear ${plan.msg_count} retained topic(s) across ${plan.per_device?.length || 0} device(s).\nThis removes them from Home Assistant.`;
+    return t("plan.clear", { messages: plan.msg_count, devices: plan.per_device?.length || 0 });
   }
   if (action === "restore") {
-    return `Restore from ${plan.from || "last backup"}:\nre-publish ${plan.set} topic(s), clear ${plan.clear} added since.`;
+    return t("plan.restore", { from: plan.from || t("plan.lastBackup"), set: plan.set, clear: plan.clear });
   }
-  return `${plan.msg_count || 0} message(s).`;
+  return t("plan.messages", { count: plan.msg_count || 0 });
 }
 
 // Two-phase action: dry-run to preview the plan, confirm, then execute. The
 // grid refreshes itself afterwards via the namespace push (broker echo).
 async function runAction(ctx, action, body, danger) {
+  const al = t("action." + action); // localized action label for toasts/confirm
   let plan;
   try {
     plan = await ctx.api(`/api/discovery/${action}`, {
@@ -100,18 +324,18 @@ async function runAction(ctx, action, body, danger) {
       body: { ...body, dry_run: true },
     });
   } catch (e) {
-    ctx.toast && ctx.toast(`${action}: ${e.message}`, "error");
+    ctx.toast && ctx.toast(`${al}: ${e.message}`, "error");
     return;
   }
   if (action !== "restore" && !plan.msg_count) {
-    ctx.toast && ctx.toast(`${action}: nothing to do`, "ok");
+    ctx.toast && ctx.toast(`${al}: ${t("toast.nothingToDo")}`, "ok");
     return;
   }
   const ok = ctx.confirm
     ? await ctx.confirm({
-        title: `${action} — confirm`,
+        title: t("confirm.title", { action: al }),
         message: describePlan(action, plan),
-        okLabel: action,
+        okLabel: al,
         danger: !!danger,
       })
     : true;
@@ -122,11 +346,11 @@ async function runAction(ctx, action, body, danger) {
       body: { ...body, dry_run: false },
     });
     const note = res.executed
-      ? `done${res.backup ? " · backup saved" : ""}`
-      : res.error || "nothing to do";
-    ctx.toast && ctx.toast(`${action}: ${note}`, "ok");
+      ? t("toast.done") + (res.backup ? t("toast.backupSuffix") : "")
+      : res.error || t("toast.nothingToDo");
+    ctx.toast && ctx.toast(`${al}: ${note}`, "ok");
   } catch (e) {
-    ctx.toast && ctx.toast(`${action}: ${e.message}`, "error");
+    ctx.toast && ctx.toast(`${al}: ${e.message}`, "error");
   }
 }
 
@@ -189,7 +413,7 @@ function filterPill(label, count, on, color, onClick) {
 // tracks the current data. `data` may be null while waiting — show title only.
 function renderHeader(ctx, data) {
   const head = el("div", "flex items-center gap-2 mb-3");
-  head.appendChild(el("h2", "text-base font-semibold", "Home Assistant Discovery"));
+  head.appendChild(el("h2", "text-base font-semibold", t("title")));
   if (!data) return head;
 
   const devices = data.devices || [];
@@ -198,14 +422,14 @@ function renderHeader(ctx, data) {
   const actionable = syncIds.length + orphanTopics.length;
   const actions = el("span", "ml-auto flex items-center gap-1.5");
   const pub = barBtn(
-    "Publish",
+    t("header.publish"),
     "slate", // neutral like Restore — a colored button read as the "Missing" (sky) category
-    "Review by category, then publish / clear orphans",
+    t("header.publishTitle"),
     () => openApplyModal(ctx, data, { publish: true, clear: true }),
   );
   pub.disabled = actionable === 0;
   actions.appendChild(pub);
-  actions.appendChild(barBtn("Restore", "slate", "Restore from a backup", () => openRestoreModal(ctx)));
+  actions.appendChild(barBtn(t("header.restore"), "slate", t("header.restoreTitle"), () => openRestoreModal(ctx)));
   head.appendChild(actions);
   return head;
 }
@@ -216,16 +440,17 @@ function renderFilterTabs(ctx, data, view, rerender) {
   const allOn = ALL_CAT_KEYS.every((k) => view.filters.has(k));
   const total = ALL_CAT_KEYS.reduce((n, k) => n + (counts[k] || 0), 0);
   wrap.appendChild(
-    filterPill("all", total, allOn, "all", () => {
+    filterPill(t("filter.all"), total, allOn, "all", () => {
       if (allOn) view.filters.clear();
       else ALL_CAT_KEYS.forEach((k) => view.filters.add(k));
       persistView(view);
       rerender();
     }),
   );
-  for (const [key, label, color] of CATEGORIES) {
+  for (const [key, color] of CATEGORIES) {
     const n = counts[key] || 0;
     const on = view.filters.has(key);
+    const label = catLabel(key);
     const pill = filterPill(label, n, on, color, () => {
       if (on) view.filters.delete(key);
       else view.filters.add(key);
@@ -233,7 +458,7 @@ function renderFilterTabs(ctx, data, view, rerender) {
       rerender();
     });
     if (n === 0 && !on) pill.classList.add("opacity-50");
-    pill.title = on ? `hide ${label}` : `show ${label}`;
+    pill.title = on ? t("filter.hide", { label }) : t("filter.show", { label });
     wrap.appendChild(pill);
   }
   return wrap;
@@ -252,7 +477,7 @@ function renderControls(data, view, rerender) {
       "focus:outline-none focus:ring-2 focus:ring-slate-400 dark:focus:ring-slate-500",
   );
   search.type = "search";
-  search.placeholder = "search name / id…";
+  search.placeholder = t("controls.searchPlaceholder");
   search.value = view.search;
   search.dataset.keepFocus = "search";
   search.addEventListener("input", () => {
@@ -267,7 +492,7 @@ function renderControls(data, view, rerender) {
     "✕",
   );
   clearX.type = "button";
-  clearX.title = "Clear";
+  clearX.title = t("controls.clearSearch");
   clearX.addEventListener("click", () => { view.search = ""; rerender(); });
   searchWrap.appendChild(search);
   searchWrap.appendChild(clearX);
@@ -276,11 +501,11 @@ function renderControls(data, view, rerender) {
   // Manager-style: the "sort by" label is folded into the select via an
   // <optgroup> header (shown when open), so no separate label row is needed.
   const sort = el("select", SELECT_CLS);
-  sort.title = "Sort devices";
+  sort.title = t("controls.sortTitle");
   const og = el("optgroup");
-  og.label = "sort by";
-  for (const [val, lbl] of [["category", "category"], ["name", "name"], ["id", "id"]]) {
-    const o = el("option", null, lbl);
+  og.label = t("controls.sortBy");
+  for (const val of ["category", "name", "id"]) {
+    const o = el("option", null, t("sort." + val));
     o.value = val;
     if (view.sort === val) o.selected = true;
     og.appendChild(o);
@@ -346,7 +571,7 @@ const SECTION_TINT = {
   slate:   "border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-800/40",
   rose:    "border-rose-200 dark:border-rose-700 bg-rose-50 dark:bg-rose-900/20",
 };
-const CAT_COLOR = Object.fromEntries(CATEGORIES.map(([k, , c]) => [k, c]));
+const CAT_COLOR = Object.fromEntries(CATEGORIES.map(([k, c]) => [k, c]));
 const ROW_STATUS = {
   pending: ["pending", "text-slate-400 dark:text-slate-500"],
   ok:      ["✓", "text-emerald-600 dark:text-emerald-400"],
@@ -367,17 +592,17 @@ function openApplyModal(ctx, data, opts) {
       const items = devices
         .filter((d) => d.category === cat)
         .map((d) => ({ id: d.id, name: d.name, checked: true, status: "pending" }));
-      if (items.length) groups.push({ key: cat, label: LABEL[cat], color: CAT_COLOR[cat], kind: "publish", items });
+      if (items.length) groups.push({ key: cat, label: catLabel(cat), color: CAT_COLOR[cat], kind: "publish", items });
     }
   }
   if (opts.clear) {
     const items = devices
       .filter((d) => d.category === "orphans")
       .flatMap((d) => (d.topics || []).map((t) => ({ topic: t, checked: true, status: "pending" })));
-    if (items.length) groups.push({ key: "orphans", label: LABEL.orphans, color: CAT_COLOR.orphans, kind: "clear", items });
+    if (items.length) groups.push({ key: "orphans", label: catLabel("orphans"), color: CAT_COLOR.orphans, kind: "clear", items });
   }
   if (!groups.length) {
-    ctx.toast && ctx.toast("nothing to do", "ok");
+    ctx.toast && ctx.toast(t("toast.nothingToDo"), "ok");
     return;
   }
 
@@ -392,8 +617,8 @@ function openApplyModal(ctx, data, opts) {
   const hasPub = groups.some((g) => g.kind === "publish");
   const hasClr = groups.some((g) => g.kind === "clear");
   const head = el("div", "px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2");
-  head.appendChild(el("h3", "text-sm font-semibold", hasPub && hasClr ? "Publish & clear orphans" : hasClr ? "Clear orphans" : "Publish needing sync"));
-  const closeX = iconBtn("✕", "Close", () => close());
+  head.appendChild(el("h3", "text-sm font-semibold", hasPub && hasClr ? t("modal.titleBoth") : hasClr ? t("modal.titleClear") : t("modal.titlePublish")));
+  const closeX = iconBtn("✕", t("common.close"), () => close());
   closeX.classList.add("ml-auto");
   head.appendChild(closeX);
   panel.appendChild(head);
@@ -403,9 +628,9 @@ function openApplyModal(ctx, data, opts) {
 
   const foot = el("div", "px-4 py-3 border-t border-slate-200 dark:border-slate-700 flex items-center gap-2");
   const progress = el("span", "text-xs text-slate-500 dark:text-slate-400 min-w-0 truncate");
-  const cancelBtn = btn("Cancel", `ml-auto ${BTN_GHOST}`, () => close());
+  const cancelBtn = btn(t("common.cancel"), `ml-auto ${BTN_GHOST}`, () => close());
   let applyHandler = apply;
-  const applyBtn = el("button", BTN_PRIMARY, "Apply");
+  const applyBtn = el("button", BTN_PRIMARY, t("modal.apply"));
   applyBtn.type = "button";
   applyBtn.addEventListener("click", () => applyHandler());
   foot.appendChild(progress);
@@ -441,7 +666,7 @@ function openApplyModal(ctx, data, opts) {
     allCb.disabled = applying;
     allCb.addEventListener("change", () => { g.items.forEach((i) => (i.checked = allCb.checked)); rerenderBody(); });
     allLbl.appendChild(allCb);
-    allLbl.appendChild(el("span", null, "select all"));
+    allLbl.appendChild(el("span", null, t("modal.selectAll")));
     h.appendChild(allLbl);
     h.addEventListener("click", (ev) => {
       if (ev.target.closest("label, input")) return; // let the checkbox do its thing
@@ -470,7 +695,7 @@ function openApplyModal(ctx, data, opts) {
       }
       row.appendChild(txt);
       const [glyph, gcls] = ROW_STATUS[it.status];
-      row.appendChild(el("span", `text-xs shrink-0 ${gcls}`, glyph));
+      row.appendChild(el("span", `text-xs shrink-0 ${gcls}`, it.status === "pending" ? t("status.pending") : glyph));
       ul.appendChild(row);
     }
     sec.appendChild(ul);
@@ -486,7 +711,7 @@ function openApplyModal(ctx, data, opts) {
   function selectedCount() { return groups.reduce((n, g) => n + g.items.filter((i) => i.checked).length, 0); }
   function updateApply() {
     const n = selectedCount();
-    applyBtn.textContent = applying ? "Applying…" : n ? `Apply ${n}` : "Apply";
+    applyBtn.textContent = applying ? t("modal.applying") : n ? t("modal.applyN", { count: n }) : t("modal.apply");
     applyBtn.disabled = applying || n === 0;
   }
 
@@ -515,10 +740,11 @@ function openApplyModal(ctx, data, opts) {
     closeX.disabled = false;
     rerenderBody();
     const okAll = pubOk && clrOk;
-    progress.textContent = okAll ? "Applied." : `Error: ${errMsg}`;
-    ctx.toast && ctx.toast(okAll ? "apply: done" : `apply: ${errMsg}`, okAll ? "ok" : "error");
+    const al = t("action.apply");
+    progress.textContent = okAll ? t("modal.applied") : t("common.error", { error: errMsg });
+    ctx.toast && ctx.toast(okAll ? `${al}: ${t("toast.done")}` : `${al}: ${errMsg}`, okAll ? "ok" : "error");
     applyHandler = close;
-    applyBtn.textContent = "Done";
+    applyBtn.textContent = t("common.done");
     applyBtn.disabled = false;
   }
 
@@ -537,11 +763,11 @@ async function openRestoreModal(ctx) {
     list = r.backups || [];
     total = r.total ?? list.length;
   } catch (e) {
-    ctx.toast && ctx.toast(`restore: ${e.message}`, "error");
+    ctx.toast && ctx.toast(`${t("action.restore")}: ${e.message}`, "error");
     return;
   }
   if (!list.length) {
-    ctx.toast && ctx.toast("no backups found", "ok");
+    ctx.toast && ctx.toast(t("restore.noBackups"), "ok");
     return;
   }
   // API returns newest-first (mtime desc); list[0] == what a default restore
@@ -555,8 +781,8 @@ async function openRestoreModal(ctx) {
   overlay.appendChild(panel);
 
   const head = el("div", "px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2");
-  head.appendChild(el("h3", "text-sm font-semibold", "Restore backup"));
-  const closeX = iconBtn("✕", "Close", () => close());
+  head.appendChild(el("h3", "text-sm font-semibold", t("restore.title")));
+  const closeX = iconBtn("✕", t("common.close"), () => close());
   closeX.classList.add("ml-auto");
   head.appendChild(closeX);
   panel.appendChild(head);
@@ -566,8 +792,8 @@ async function openRestoreModal(ctx) {
 
   const foot = el("div", "px-4 py-3 border-t border-slate-200 dark:border-slate-700 flex items-center gap-2");
   const progress = el("span", "text-xs text-slate-500 dark:text-slate-400 min-w-0 break-all");
-  const cancelBtn = btn("Cancel", `ml-auto ${BTN_GHOST}`, () => close());
-  const okBtn = el("button", BTN_PRIMARY, "Restore");
+  const cancelBtn = btn(t("common.cancel"), `ml-auto ${BTN_GHOST}`, () => close());
+  const okBtn = el("button", BTN_PRIMARY, t("restore.restore"));
   okBtn.type = "button";
   okBtn.addEventListener("click", () => onOk());
   foot.appendChild(progress);
@@ -588,7 +814,7 @@ async function openRestoreModal(ctx) {
     bodyEl.innerHTML = "";
     if (total > list.length) {
       bodyEl.appendChild(
-        el("div", "text-[11px] text-slate-400 dark:text-slate-500 mb-2", `Showing newest ${list.length} of ${total} backups.`),
+        el("div", "text-[11px] text-slate-400 dark:text-slate-500 mb-2", t("restore.showing", { shown: list.length, total })),
       );
     }
     const ul = el("div", "divide-y divide-slate-100 dark:divide-slate-700 border border-slate-200 dark:border-slate-700 rounded");
@@ -602,7 +828,7 @@ async function openRestoreModal(ctx) {
       rb.addEventListener("change", () => { selected = bk.path; });
       row.appendChild(rb);
       row.appendChild(el("span", "flex-1 min-w-0 break-all font-mono text-xs", bk.name));
-      if (i === 0) row.appendChild(el("span", "text-[10px] uppercase tracking-wide text-emerald-600 dark:text-emerald-400 shrink-0", "latest"));
+      if (i === 0) row.appendChild(el("span", "text-[10px] uppercase tracking-wide text-emerald-600 dark:text-emerald-400 shrink-0", t("restore.latest")));
       ul.appendChild(row);
     });
     bodyEl.appendChild(ul);
@@ -618,12 +844,12 @@ async function openRestoreModal(ctx) {
     if (phase === "select") {
       try {
         const plan = await ctx.api("/api/discovery/restore", { method: "POST", body: { file: selected, dry_run: true } });
-        progress.textContent = `Re-publish ${plan.set ?? 0}, clear ${plan.clear ?? 0} — Confirm to apply.`;
+        progress.textContent = t("restore.preview", { set: plan.set ?? 0, clear: plan.clear ?? 0 });
         phase = "confirm";
-        okBtn.textContent = "Confirm restore";
+        okBtn.textContent = t("restore.confirm");
       } catch (e) {
-        progress.textContent = `Error: ${e.message}`;
-        ctx.toast && ctx.toast(`restore: ${e.message}`, "error");
+        progress.textContent = t("common.error", { error: e.message });
+        ctx.toast && ctx.toast(`${t("action.restore")}: ${e.message}`, "error");
       }
       busy = false;
       cancelBtn.disabled = false;
@@ -636,17 +862,18 @@ async function openRestoreModal(ctx) {
     try {
       const res = await ctx.api("/api/discovery/restore", { method: "POST", body: { file: selected, dry_run: false } });
       const ok = !!res.executed;
-      progress.textContent = ok ? "Restored." : (res.error || "nothing to do");
-      ctx.toast && ctx.toast(ok ? "restore: done" : `restore: ${res.error || "nothing to do"}`, ok ? "ok" : "error");
+      const rl = t("action.restore");
+      progress.textContent = ok ? t("restore.restored") : (res.error || t("toast.nothingToDo"));
+      ctx.toast && ctx.toast(ok ? `${rl}: ${t("toast.done")}` : `${rl}: ${res.error || t("toast.nothingToDo")}`, ok ? "ok" : "error");
     } catch (e) {
-      progress.textContent = `Error: ${e.message}`;
-      ctx.toast && ctx.toast(`restore: ${e.message}`, "error");
+      progress.textContent = t("common.error", { error: e.message });
+      ctx.toast && ctx.toast(`${t("action.restore")}: ${e.message}`, "error");
     }
     busy = false;
     cancelBtn.disabled = false;
     closeX.disabled = false;
     phase = "done";
-    okBtn.textContent = "Done";
+    okBtn.textContent = t("common.done");
     okBtn.disabled = false;
     renderList();
   }
@@ -689,8 +916,8 @@ function renderDetailPanel(d) {
     for (const t of topics) b.appendChild(el("div", "font-mono pl-3 text-slate-500 break-all", t));
     wrap.appendChild(b);
   };
-  topicList("missing", det.missing, "text-rose-600 dark:text-rose-400");
-  topicList("unexpected", det.unexpected, "text-purple-600 dark:text-purple-400");
+  topicList(t("detail.missing"), det.missing, "text-rose-600 dark:text-rose-400");
+  topicList(t("detail.unexpected"), det.unexpected, "text-purple-600 dark:text-purple-400");
   return wrap;
 }
 
@@ -749,7 +976,7 @@ function deviceCard(ctx, d, view, rerender) {
       `border-l-4 dark:border-l-[6px] ${cat.edge} p-3 mb-2` +
       (expandable ? " cursor-pointer" : ""),
   );
-  card.title = LABEL[d.category] || d.category; // category lives on the stripe; hover to read it
+  card.title = catLabel(d.category) || d.category; // category lives on the stripe; hover to read it
   if (expandable) {
     card.addEventListener("click", (ev) => {
       if (ev.target.closest("button, input, a")) return;
@@ -773,7 +1000,7 @@ function deviceCard(ctx, d, view, rerender) {
       isOrphan
         ? "font-mono text-xs text-slate-700 dark:text-slate-300 break-all min-w-0"
         : "font-medium text-sm text-slate-900 dark:text-slate-100 truncate min-w-0",
-      isOrphan ? ((d.topics || []).join(", ") || "(orphan)") : (d.name || d.id || ""),
+      isOrphan ? ((d.topics || []).join(", ") || t("card.orphan")) : (d.name || d.id || ""),
     ),
   );
   const right = el("span", "ml-auto flex items-center gap-1.5 shrink-0");
@@ -781,7 +1008,7 @@ function deviceCard(ctx, d, view, rerender) {
     // Orphans have no device to publish; the only action is clearing the stray
     // retained topic(s) — cleared by explicit topic (their owner id is unknown).
     right.appendChild(
-      iconBtn("🗑", "Clear retained topic(s)", () => runAction(ctx, "clear", { topics: d.topics || [] }, true), "danger-fill"),
+      iconBtn("🗑", t("card.clearTopics"), () => runAction(ctx, "clear", { topics: d.topics || [] }, true), "danger-fill"),
     );
   } else {
     const ok = (d.matched ?? 0) === (d.expected ?? 0);
@@ -790,19 +1017,19 @@ function deviceCard(ctx, d, view, rerender) {
       `text-[11px] font-mono ${ok ? "text-emerald-600 dark:text-emerald-400" : "text-slate-500 dark:text-slate-400"}`,
       `${d.matched ?? 0}/${d.expected ?? 0}`,
     );
-    metric.title = "matched / expected entities";
+    metric.title = t("card.metricTitle");
     right.appendChild(metric);
     // + disabled when nothing needs publishing (perfect / no_dp_config);
     // − disabled when nothing of ours is retained (pure_missing / no_dp_config).
-    const pub = iconBtn("+", "Publish", () => runAction(ctx, "publish", { ids: [d.id] }, false));
+    const pub = iconBtn("+", t("card.publish"), () => runAction(ctx, "publish", { ids: [d.id] }, false));
     pub.disabled = !NEEDS_SYNC.has(d.category);
     right.appendChild(pub);
-    const clr = iconBtn("−", "Clear", () => runAction(ctx, "clear", { ids: [d.id] }, true), "danger");
+    const clr = iconBtn("−", t("card.clear"), () => runAction(ctx, "clear", { ids: [d.id] }, true), "danger");
     clr.disabled = !CAN_CLEAR.has(d.category);
     right.appendChild(clr);
   }
   if (expandable) {
-    right.appendChild(iconBtn(isOpen ? "▾" : "▸", isOpen ? "Collapse" : "Expand", toggle));
+    right.appendChild(iconBtn(isOpen ? "▾" : "▸", isOpen ? t("card.collapse") : t("card.expand"), toggle));
   }
   top.appendChild(right);
   card.appendChild(top);
@@ -839,14 +1066,14 @@ function renderGrid(ctx, data, view, rerender) {
     return el(
       "div",
       "text-sm text-slate-500 dark:text-slate-400 py-8 text-center",
-      "No devices to show yet.",
+      t("grid.empty"),
     );
   }
   if (!devices.length) {
     return el(
       "div",
       "text-sm text-slate-500 dark:text-slate-400 py-8 text-center",
-      "No devices match the current filter.",
+      t("grid.noMatch"),
     );
   }
   const list = el("div"); // cards carry their own mb-2
@@ -861,7 +1088,7 @@ function renderErrors(data) {
     "div",
     "mt-3 p-2 rounded bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-200 text-xs",
   );
-  box.appendChild(el("div", "font-medium mb-1", `Generator errors (${errs.length})`));
+  box.appendChild(el("div", "font-medium mb-1", t("errors.title", { count: errs.length })));
   for (const e of errs) box.appendChild(el("div", "font-mono", e));
   return box;
 }
@@ -903,7 +1130,7 @@ async function loadConverters(ctx, view, rerender) {
         : ALL_CONV; // default to the whole-file ("All") view; a stale per-product pick also falls back here
     selectProduct(view, keep);
   } catch (e) {
-    ctx.toast && ctx.toast(`converters: ${e.message}`, "error");
+    ctx.toast && ctx.toast(`${t("conv.label")}: ${e.message}`, "error");
   } finally {
     view.conv.busy = false;
     rerender();
@@ -926,24 +1153,24 @@ async function convAction(ctx, view, rerender, kind) {
     try {
       mapping = JSON.parse(c.text.trim() || "{}");
     } catch (e) {
-      ctx.toast && ctx.toast(`invalid JSON: ${e.message}`, "error");
+      ctx.toast && ctx.toast(`${t("conv.invalidJson")}: ${e.message}`, "error");
       return;
     }
     const ok = ctx.confirm
       ? await ctx.confirm({
-          title: "converters — save all",
-          message: "Replace the entire converters file with this JSON?\nThis changes what Publish emits for every overridden product.",
-          okLabel: "save all",
+          title: t("conv.saveAllTitle"),
+          message: t("conv.saveAllMsg"),
+          okLabel: t("action.saveAll"),
           danger: true,
         })
       : true;
     if (!ok) return;
     try {
       const res = await ctx.api("/api/discovery/converters/save_all", { method: "POST", body: { converters: mapping } });
-      ctx.toast && ctx.toast(`converters saved (${res.count})${res.backup ? " · backup" : ""}`, "ok");
+      ctx.toast && ctx.toast(t("conv.savedAll", { count: res.count }) + (res.backup ? t("toast.backupSuffix") : ""), "ok");
       await loadConverters(ctx, view, rerender);
     } catch (e) {
-      ctx.toast && ctx.toast(`save all: ${e.message}`, "error");
+      ctx.toast && ctx.toast(`${t("action.saveAll")}: ${e.message}`, "error");
     }
     return;
   }
@@ -951,7 +1178,7 @@ async function convAction(ctx, view, rerender, kind) {
   try {
     override = kind === "delete" ? null : parseOverride(c.text);
   } catch (e) {
-    ctx.toast && ctx.toast(`invalid JSON: ${e.message}`, "error");
+    ctx.toast && ctx.toast(`${t("conv.invalidJson")}: ${e.message}`, "error");
     return;
   }
   if (kind === "preview") {
@@ -962,15 +1189,15 @@ async function convAction(ctx, view, rerender, kind) {
       });
       rerender();
     } catch (e) {
-      ctx.toast && ctx.toast(`preview: ${e.message}`, "error");
+      ctx.toast && ctx.toast(`${t("action.preview")}: ${e.message}`, "error");
     }
     return;
   }
   const msg = kind === "delete"
-    ? `Delete the override for ${c.selected}?`
-    : `Save the override for ${c.selected}?\nThis changes what Publish emits for its device(s).`;
+    ? t("conv.deleteMsg", { pid: c.selected })
+    : t("conv.saveMsg", { pid: c.selected });
   const ok = ctx.confirm
-    ? await ctx.confirm({ title: `converter ${kind}`, message: msg, okLabel: kind, danger: kind === "delete" })
+    ? await ctx.confirm({ title: t("conv.actionTitle", { action: t("action." + kind) }), message: msg, okLabel: t("action." + kind), danger: kind === "delete" })
     : true;
   if (!ok) return;
   try {
@@ -979,26 +1206,26 @@ async function convAction(ctx, view, rerender, kind) {
       body: { product_id: c.selected, override },
     });
     ctx.toast &&
-      ctx.toast(`converter ${res.deleted ? "deleted" : "saved"}${res.backup ? " · backup" : ""}`, "ok");
+      ctx.toast((res.deleted ? t("conv.deleted") : t("conv.saved")) + (res.backup ? t("toast.backupSuffix") : ""), "ok");
     await loadConverters(ctx, view, rerender); // refresh has-override + canonical text
   } catch (e) {
-    ctx.toast && ctx.toast(`${kind}: ${e.message}`, "error");
+    ctx.toast && ctx.toast(`${t("action." + kind)}: ${e.message}`, "error");
   }
 }
 
 function renderConvPreview(preview) {
   const box = el("div", "mt-2 p-2 rounded bg-slate-50 dark:bg-slate-800/40 text-xs space-y-2");
   box.appendChild(
-    el("div", "font-medium", `Preview — ${preview.product_id} (${(preview.devices || []).length} device(s))`),
+    el("div", "font-medium", t("conv.previewTitle", { pid: preview.product_id, count: (preview.devices || []).length })),
   );
   for (const d of preview.devices || []) {
     const b = el("div");
     if (d.error) {
-      b.appendChild(el("div", "text-rose-600 dark:text-rose-400", `${d.name} (${d.id}): ${d.error}`));
+      b.appendChild(el("div", "text-rose-600 dark:text-rose-400", t("conv.previewError", { name: d.name, id: d.id, error: d.error })));
     } else {
       const topics = Object.keys(d.topics || {});
       b.appendChild(
-        el("div", "font-medium", `${d.name} (${d.id}) — ${topics.length} topic(s) · ${d.source || ""}`),
+        el("div", "font-medium", t("conv.previewDevice", { name: d.name, id: d.id, count: topics.length, source: d.source || "" })),
       );
       const pre = el("pre", "font-mono whitespace-pre-wrap break-all text-slate-500 dark:text-slate-400");
       pre.textContent = jsonPretty(d.topics);
@@ -1013,7 +1240,7 @@ function renderConverters(ctx, view, rerender) {
   const c = view.conv;
   const wrap = el("div", "mt-4 border-t border-slate-200 dark:border-slate-700 pt-3");
   wrap.appendChild(
-    btn(`${c.open ? "▾" : "▸"} Custom converters`, "text-sm font-semibold mb-2", () => {
+    btn(`${c.open ? "▾" : "▸"} ${t("conv.section")}`, "text-sm font-semibold mb-2", () => {
       c.open = !c.open;
       if (c.open && !c.loaded) loadConverters(ctx, view, rerender);
       else rerender();
@@ -1021,7 +1248,7 @@ function renderConverters(ctx, view, rerender) {
   );
   if (!c.open) return wrap;
   if (!c.loaded) {
-    wrap.appendChild(el("div", "text-xs text-slate-500", c.busy ? "loading…" : ""));
+    wrap.appendChild(el("div", "text-xs text-slate-500", c.busy ? t("common.loading") : ""));
     return wrap;
   }
   const info = c.info || { products: [], converters: {}, save_path: "" };
@@ -1031,7 +1258,7 @@ function renderConverters(ctx, view, rerender) {
   const row = el("div", "flex flex-wrap gap-2 items-center mb-2");
   const sel = el("select", SELECT_CLS);
   // "All" lets you see/edit the whole converters file in one JSON blob.
-  const allOpt = el("option", null, "All (full JSON)");
+  const allOpt = el("option", null, t("conv.all"));
   allOpt.value = ALL_CONV;
   if (isAll) allOpt.selected = true;
   sel.appendChild(allOpt);
@@ -1039,7 +1266,7 @@ function renderConverters(ctx, view, rerender) {
     const o = el(
       "option",
       null,
-      `${pr.product_id} · ${pr.device_ids.length} dev${pr.has_override ? " ✏" : ""}`,
+      t("conv.product", { pid: pr.product_id, count: pr.device_ids.length }) + (pr.has_override ? " ✏" : ""),
     );
     o.value = pr.product_id;
     if (pr.product_id === c.selected) o.selected = true;
@@ -1060,9 +1287,7 @@ function renderConverters(ctx, view, rerender) {
   ta.value = c.text;
   ta.dataset.keepFocus = "conv-text";
   ta.spellcheck = false;
-  ta.placeholder = isAll
-    ? '{"<product_id>": {"model": "...", "dp_meta": { ... }}, ...}  — the whole converters file'
-    : '{"model": "...", "dp_meta": { "1": { ... } }}  — empty or "null" deletes';
+  ta.placeholder = isAll ? t("conv.phAll") : t("conv.phOne");
   ta.addEventListener("input", () => {
     c.text = ta.value;
   });
@@ -1071,16 +1296,16 @@ function renderConverters(ctx, view, rerender) {
   const acts = el("div", "flex flex-wrap gap-2 mt-2 items-center");
   // Preview is per-product (regenerates that product's devices); not meaningful
   // for the whole-file edit.
-  const previewBtn = btn("Preview", BTN_GHOST, () => convAction(ctx, view, rerender, "preview"));
-  const saveBtn = btn("Save", BTN_PRIMARY, () => convAction(ctx, view, rerender, "save"));
+  const previewBtn = btn(t("conv.preview"), BTN_GHOST, () => convAction(ctx, view, rerender, "preview"));
+  const saveBtn = btn(t("common.save"), BTN_PRIMARY, () => convAction(ctx, view, rerender, "save"));
   previewBtn.disabled = isAll;
   saveBtn.disabled = false;
   acts.appendChild(previewBtn);
   acts.appendChild(saveBtn);
   if (!isAll && c.selected && info.converters && c.selected in info.converters) {
-    acts.appendChild(btn("Delete override", BTN_DANGER, () => convAction(ctx, view, rerender, "delete")));
+    acts.appendChild(btn(t("conv.deleteOverride"), BTN_DANGER, () => convAction(ctx, view, rerender, "delete")));
   }
-  acts.appendChild(el("span", "text-xs text-slate-400 ml-auto", `saves to ${info.save_path || "?"}`));
+  acts.appendChild(el("span", "text-xs text-slate-400 ml-auto", t("conv.savesTo", { path: info.save_path || "?" })));
   wrap.appendChild(acts);
 
   if (c.preview) wrap.appendChild(renderConvPreview(c.preview));
@@ -1099,6 +1324,18 @@ export async function mount(rootEl, ctx) {
   const body = el("div");
   container.appendChild(body);
   rootEl.appendChild(container);
+
+  // Pick the initial language from the host (ctx.getLang, rc49+) or, on an older
+  // manager without it, the same localStorage key the shell persists — so the
+  // plugin still localizes even where live switching isn't wired.
+  const readLang = () => {
+    try {
+      return (ctx.getLang && ctx.getLang()) || localStorage.getItem("lang") || "en";
+    } catch {
+      return "en";
+    }
+  };
+  lang = readLang();
 
   // View state persists across re-renders (live pushes + filter/sort/expand).
   // `filters` (category multi-select) and `sort` are seeded from localStorage so
@@ -1122,7 +1359,7 @@ export async function mount(rootEl, ctx) {
     body.appendChild(renderHeader(ctx, data));
     if (!data) {
       body.appendChild(
-        el("div", "text-sm text-slate-500 py-8 text-center", "Waiting for discovery state…"),
+        el("div", "text-sm text-slate-500 py-8 text-center", t("grid.waiting")),
       );
       return;
     }
@@ -1174,5 +1411,18 @@ export async function mount(rootEl, ctx) {
     const d = s && s.plugins && s.plugins.discovery;
     if (d) paint(d);
   });
-  return unsub; // host may call this on unmount (future-proofing)
+
+  // Re-render in the new language when the shell's language switches (rc49+).
+  // applyDom() only reaches [data-i18n] nodes, so this imperatively-built UI
+  // needs its own re-render. Optional: an older manager simply never fires it
+  // (the language then changes only on a tab re-enter). The host passes the new
+  // code, but we re-read to also cover a switch to a code the host doesn't pass.
+  const unsubLang = ctx.onLangChange?.((code) => {
+    lang = code || readLang();
+    render();
+  });
+  return () => {
+    unsub && unsub();
+    unsubLang && unsubLang();
+  };
 }
