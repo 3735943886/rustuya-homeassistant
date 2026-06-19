@@ -10,227 +10,76 @@
 // its plan via a dry-run, confirms, then executes — the grid refreshes itself
 // from the namespace push (broker echo) afterwards.
 
-// ── i18n (self-contained) ─────────────────────────────────────────────────
-// The plugin ships its own dictionaries and re-renders on a language switch via
-// ctx.onLangChange, so it never depends on the manager merging plugin keys. On
-// an older manager that lacks the hooks it still localizes to the saved language
-// at mount (read from the same localStorage key the shell persists); only live
-// switching is unavailable there. Keys mirror the manager's {placeholder} fill.
-const STR = {
-  en: {
-    "title": "Home Assistant Discovery",
-    "cat.pure_missing": "Missing",
-    "cat.orphans": "Orphans",
-    "cat.mismatched_payload": "Mismatched",
-    "cat.partially_missing": "Partial",
-    "cat.unexpected_topics": "Unexpected",
-    "cat.no_dp_config": "No DP config",
-    "cat.perfect": "Perfect",
-    "action.publish": "publish",
-    "action.clear": "clear",
-    "action.restore": "restore",
-    "action.apply": "apply",
-    "action.save": "save",
-    "action.saveAll": "save all",
-    "action.delete": "delete",
-    "action.preview": "preview",
-    "header.publish": "Publish",
-    "header.publishTitle": "Review by category, then publish / clear orphans",
-    "header.restore": "Restore",
-    "header.restoreTitle": "Restore from a backup",
-    "plan.publish": "Publish {devices} device(s): {configs} config(s), clear {stale} stale.\n{messages} retained MQTT message(s).",
-    "plan.genErrors": "\n⚠ {count} generator error(s).",
-    "plan.clear": "Clear {messages} retained topic(s) across {devices} device(s).\nThis removes them from Home Assistant.",
-    "plan.restore": "Restore from {from}:\nre-publish {set} topic(s), clear {clear} added since.",
-    "plan.lastBackup": "last backup",
-    "plan.messages": "{count} message(s).",
-    "confirm.title": "{action} — confirm",
-    "toast.nothingToDo": "nothing to do",
-    "toast.done": "done",
-    "toast.backupSuffix": " · backup saved",
-    "controls.searchPlaceholder": "search name / id…",
-    "controls.clearSearch": "Clear",
-    "controls.sortTitle": "Sort devices",
-    "controls.sortBy": "sort by",
-    "sort.category": "category",
-    "sort.name": "name",
-    "sort.id": "id",
-    "filter.all": "all",
-    "filter.hide": "hide {label}",
-    "filter.show": "show {label}",
-    "modal.titleBoth": "Publish & clear orphans",
-    "modal.titleClear": "Clear orphans",
-    "modal.titlePublish": "Publish needing sync",
-    "modal.apply": "Apply",
-    "modal.applyN": "Apply {count}",
-    "modal.applying": "Applying…",
-    "modal.selectAll": "select all",
-    "modal.applied": "Applied.",
-    "common.close": "Close",
-    "common.cancel": "Cancel",
-    "common.done": "Done",
-    "common.save": "Save",
-    "common.loading": "loading…",
-    "common.error": "Error: {error}",
-    "status.pending": "pending",
-    "restore.noBackups": "no backups found",
-    "restore.title": "Restore backup",
-    "restore.restore": "Restore",
-    "restore.showing": "Showing newest {shown} of {total} backups.",
-    "restore.latest": "latest",
-    "restore.preview": "Re-publish {set}, clear {clear} — Confirm to apply.",
-    "restore.confirm": "Confirm restore",
-    "restore.restored": "Restored.",
-    "detail.missing": "missing",
-    "detail.unexpected": "unexpected",
-    "card.metricTitle": "matched / expected entities",
-    "card.clearTopics": "Clear retained topic(s)",
-    "card.publish": "Publish",
-    "card.clear": "Clear",
-    "card.collapse": "Collapse",
-    "card.expand": "Expand",
-    "card.orphan": "(orphan)",
-    "grid.empty": "No devices to show yet.",
-    "grid.noMatch": "No devices match the current filter.",
-    "grid.waiting": "Waiting for discovery state…",
-    "errors.title": "Generator errors ({count})",
-    "conv.section": "Custom converters",
-    "conv.label": "converters",
-    "conv.all": "All (full JSON)",
-    "conv.product": "{pid} · {count} dev",
-    "conv.saveAllTitle": "converters — save all",
-    "conv.saveAllMsg": "Replace the entire converters file with this JSON?\nThis changes what Publish emits for every overridden product.",
-    "conv.savedAll": "converters saved ({count})",
-    "conv.deleteMsg": "Delete the override for {pid}?",
-    "conv.saveMsg": "Save the override for {pid}?\nThis changes what Publish emits for its device(s).",
-    "conv.actionTitle": "converter {action}",
-    "conv.deleted": "converter deleted",
-    "conv.saved": "converter saved",
-    "conv.previewTitle": "Preview — {pid} ({count} device(s))",
-    "conv.previewDevice": "{name} ({id}) — {count} topic(s) · {source}",
-    "conv.previewError": "{name} ({id}): {error}",
-    "conv.phAll": '{"<product_id>": {"model": "...", "dp_meta": { ... }}, ...}  — the whole converters file',
-    "conv.phOne": '{"model": "...", "dp_meta": { "1": { ... } }}  — empty or "null" deletes',
-    "conv.preview": "Preview",
-    "conv.deleteOverride": "Delete override",
-    "conv.savesTo": "saves to {path}",
-    "conv.invalidJson": "invalid JSON",
-  },
-  ko: {
-    "title": "Home Assistant 디스커버리",
-    "cat.pure_missing": "누락",
-    "cat.orphans": "고아",
-    "cat.mismatched_payload": "불일치",
-    "cat.partially_missing": "부분누락",
-    "cat.unexpected_topics": "예상밖",
-    "cat.no_dp_config": "DP 설정 없음",
-    "cat.perfect": "완벽",
-    "action.publish": "발행",
-    "action.clear": "제거",
-    "action.restore": "복원",
-    "action.apply": "적용",
-    "action.save": "저장",
-    "action.saveAll": "전체 저장",
-    "action.delete": "삭제",
-    "action.preview": "미리보기",
-    "header.publish": "발행",
-    "header.publishTitle": "카테고리별로 검토 후 발행 / 고아 제거",
-    "header.restore": "복원",
-    "header.restoreTitle": "백업에서 복원",
-    "plan.publish": "기기 {devices}개 발행: 설정 {configs}개, 오래된 항목 {stale}개 제거.\n유지(retained) MQTT 메시지 {messages}개.",
-    "plan.genErrors": "\n⚠ 제너레이터 오류 {count}개.",
-    "plan.clear": "기기 {devices}개에서 유지 토픽 {messages}개 제거.\nHome Assistant에서 사라집니다.",
-    "plan.restore": "{from}에서 복원:\n토픽 {set}개 재발행, 이후 추가된 {clear}개 제거.",
-    "plan.lastBackup": "마지막 백업",
-    "plan.messages": "메시지 {count}개.",
-    "confirm.title": "{action} — 확인",
-    "toast.nothingToDo": "할 작업 없음",
-    "toast.done": "완료",
-    "toast.backupSuffix": " · 백업됨",
-    "controls.searchPlaceholder": "이름 / ID 검색…",
-    "controls.clearSearch": "지우기",
-    "controls.sortTitle": "기기 정렬",
-    "controls.sortBy": "정렬 기준",
-    "sort.category": "카테고리",
-    "sort.name": "이름",
-    "sort.id": "ID",
-    "filter.all": "전체",
-    "filter.hide": "{label} 숨기기",
-    "filter.show": "{label} 보기",
-    "modal.titleBoth": "발행 및 고아 제거",
-    "modal.titleClear": "고아 제거",
-    "modal.titlePublish": "동기화 필요 발행",
-    "modal.apply": "적용",
-    "modal.applyN": "{count}개 적용",
-    "modal.applying": "적용 중…",
-    "modal.selectAll": "전체 선택",
-    "modal.applied": "적용됨.",
-    "common.close": "닫기",
-    "common.cancel": "취소",
-    "common.done": "완료",
-    "common.save": "저장",
-    "common.loading": "불러오는 중…",
-    "common.error": "오류: {error}",
-    "status.pending": "대기",
-    "restore.noBackups": "백업 없음",
-    "restore.title": "백업 복원",
-    "restore.restore": "복원",
-    "restore.showing": "최근 {shown}개 표시 (전체 {total}개).",
-    "restore.latest": "최신",
-    "restore.preview": "{set}개 재발행, {clear}개 제거 — 확인 시 적용.",
-    "restore.confirm": "복원 확인",
-    "restore.restored": "복원됨.",
-    "detail.missing": "누락",
-    "detail.unexpected": "예상밖",
-    "card.metricTitle": "일치 / 예상 엔티티",
-    "card.clearTopics": "유지 토픽 제거",
-    "card.publish": "발행",
-    "card.clear": "제거",
-    "card.collapse": "접기",
-    "card.expand": "펼치기",
-    "card.orphan": "(고아)",
-    "grid.empty": "표시할 기기가 아직 없습니다.",
-    "grid.noMatch": "현재 필터에 맞는 기기가 없습니다.",
-    "grid.waiting": "디스커버리 상태 대기 중…",
-    "errors.title": "제너레이터 오류 ({count})",
-    "conv.section": "커스텀 컨버터",
-    "conv.label": "컨버터",
-    "conv.all": "전체 (전체 JSON)",
-    "conv.product": "{pid} · 기기 {count}개",
-    "conv.saveAllTitle": "컨버터 — 전체 저장",
-    "conv.saveAllMsg": "컨버터 파일 전체를 이 JSON으로 교체할까요?\n오버라이드된 모든 제품의 발행 결과가 바뀝니다.",
-    "conv.savedAll": "컨버터 저장됨 ({count})",
-    "conv.deleteMsg": "{pid} 오버라이드를 삭제할까요?",
-    "conv.saveMsg": "{pid} 오버라이드를 저장할까요?\n해당 기기의 발행 결과가 바뀝니다.",
-    "conv.actionTitle": "컨버터 {action}",
-    "conv.deleted": "컨버터 삭제됨",
-    "conv.saved": "컨버터 저장됨",
-    "conv.previewTitle": "미리보기 — {pid} (기기 {count}개)",
-    "conv.previewDevice": "{name} ({id}) — 토픽 {count}개 · {source}",
-    "conv.previewError": "{name} ({id}): {error}",
-    "conv.phAll": '{"<product_id>": {"model": "...", "dp_meta": { ... }}, ...}  — 전체 컨버터 파일',
-    "conv.phOne": '{"model": "...", "dp_meta": { "1": { ... } }}  — 비우거나 "null"이면 삭제',
-    "conv.preview": "미리보기",
-    "conv.deleteOverride": "오버라이드 삭제",
-    "conv.savesTo": "저장 위치: {path}",
-    "conv.invalidJson": "잘못된 JSON",
-  },
-};
+// ── i18n (self-contained, file-based) ─────────────────────────────────────
+// Translations live in sibling JSON catalogs under ./locales/: en.json is the
+// source of truth + fallback, and index.json lists the selectable languages
+// with their display names. They're fetched relative to this module's URL, so
+// the plugin owns its languages outright — adding one is a dropped xx.json plus
+// a line in index.json, no manager change. The shell's language seeds the
+// initial pick (ctx.getLang) and a global switch re-syncs us (ctx.onLangChange),
+// but the in-tab picker can override it; whichever was touched last is persisted.
+const LS_LANG = "rustuya-ha.discovery.lang";
+const localeUrl = (name) => new URL(`./locales/${name}.json`, import.meta.url).href;
 
-// Active language; set in mount() from ctx.getLang()/localStorage. Mutable so a
-// language switch (ctx.onLangChange → re-render) picks up the new dictionary.
+// Loaded dictionaries by code (en present once boot completes) + the manifest's
+// language list. `lang` is the active code.
+const DICTS = {};
+let LOCALES = [{ code: "en", name: "English" }];
 let lang = "en";
 
+async function fetchJson(url) {
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+// Load a language's catalog once (cached). A failure resolves to {} so t() falls
+// back to en / the raw key rather than throwing mid-render.
+async function loadDict(code) {
+  if (DICTS[code]) return DICTS[code];
+  try {
+    DICTS[code] = await fetchJson(localeUrl(code));
+  } catch {
+    DICTS[code] = {};
+  }
+  return DICTS[code];
+}
+
+// Boot i18n: read the manifest (best-effort) and always load en as the fallback
+// layer. Returns the available-language list for the picker.
+async function initLocales() {
+  try {
+    const m = await fetchJson(localeUrl("index"));
+    if (Array.isArray(m.available) && m.available.length) LOCALES = m.available;
+  } catch {
+    /* offline / no manifest — keep the en-only default list */
+  }
+  await loadDict("en");
+  return LOCALES;
+}
+
 // Translate `key`, filling {name} placeholders from `vars`. Active locale →
-// English fallback → the key itself, mirroring the manager's resolver.
+// English fallback → the key itself (so a missing key is visible, not blank).
 function t(key, vars) {
-  let s = (STR[lang] && STR[lang][key]) ?? STR.en[key] ?? key;
+  const dict = DICTS[lang] || DICTS.en || {};
+  let s = dict[key] ?? (DICTS.en || {})[key] ?? key;
   if (vars) {
     s = s.replace(/\{(\w+)\}/g, (m, name) => (name in vars ? String(vars[name]) : m));
   }
   return s;
 }
 
+// Switch active language: ensure its dict is loaded, then set + persist. Returns
+// false (a no-op) if the code isn't one the manifest offers. Callers re-render.
+async function setPluginLang(code) {
+  if (!LOCALES.some((l) => l.code === code)) return false;
+  await loadDict(code);
+  lang = code;
+  try {
+    localStorage.setItem(LS_LANG, code);
+  } catch {}
+  return true;
+}
 // [key, color] — color drives the filter-tab pill and must match the card's
 // left-stripe color (CAT_STYLE) so a category reads as one hue. Labels come from
 // t("cat.<key>"). Filter-pill order mirrors the manager's default (problems
@@ -517,6 +366,23 @@ function renderControls(data, view, rerender) {
     rerender();
   });
   bar.appendChild(sort);
+
+  // Language picker — driven by the plugin's own ./locales catalogs (seeded from
+  // the shell's language, overridable here). Shown only when >1 is offered.
+  if (LOCALES.length > 1) {
+    const langSel = el("select", SELECT_CLS);
+    langSel.title = t("controls.language");
+    for (const l of LOCALES) {
+      const o = el("option", null, l.name);
+      o.value = l.code;
+      if (l.code === lang) o.selected = true;
+      langSel.appendChild(o);
+    }
+    langSel.addEventListener("change", async () => {
+      if (await setPluginLang(langSel.value)) rerender();
+    });
+    bar.appendChild(langSel);
+  }
   return bar;
 }
 
@@ -1325,17 +1191,29 @@ export async function mount(rootEl, ctx) {
   container.appendChild(body);
   rootEl.appendChild(container);
 
-  // Pick the initial language from the host (ctx.getLang, rc49+) or, on an older
-  // manager without it, the same localStorage key the shell persists — so the
-  // plugin still localizes even where live switching isn't wired.
-  const readLang = () => {
+  // Boot translations before the first paint so every label resolves. Then pick
+  // the initial language: a previously saved in-tab choice wins, else the shell's
+  // current language (ctx.getLang, rc49+), else the manifest default — each only
+  // if the plugin actually ships it. The seed isn't persisted, so without an
+  // explicit pick the plugin keeps following the shell.
+  await initLocales();
+  const offered = (c) => !!c && LOCALES.some((l) => l.code === c);
+  const saved = (() => {
     try {
-      return (ctx.getLang && ctx.getLang()) || localStorage.getItem("lang") || "en";
+      return localStorage.getItem(LS_LANG);
     } catch {
-      return "en";
+      return null;
     }
-  };
-  lang = readLang();
+  })();
+  const host = (() => {
+    try {
+      return ctx.getLang && ctx.getLang();
+    } catch {
+      return null;
+    }
+  })();
+  lang = (offered(saved) && saved) || (offered(host) && host) || LOCALES[0].code;
+  await loadDict(lang);
 
   // View state persists across re-renders (live pushes + filter/sort/expand).
   // `filters` (category multi-select) and `sort` are seeded from localStorage so
@@ -1412,14 +1290,13 @@ export async function mount(rootEl, ctx) {
     if (d) paint(d);
   });
 
-  // Re-render in the new language when the shell's language switches (rc49+).
-  // applyDom() only reaches [data-i18n] nodes, so this imperatively-built UI
-  // needs its own re-render. Optional: an older manager simply never fires it
-  // (the language then changes only on a tab re-enter). The host passes the new
-  // code, but we re-read to also cover a switch to a code the host doesn't pass.
-  const unsubLang = ctx.onLangChange?.((code) => {
-    lang = code || readLang();
-    render();
+  // Re-sync to the shell's language when it switches (rc49+). applyDom() only
+  // reaches [data-i18n] nodes, so this imperatively-built UI re-renders itself.
+  // setPluginLang loads + persists the new code; if the plugin doesn't ship it,
+  // it's a no-op and we keep the current language. Optional — an older manager
+  // never fires it (language then changes only via the in-tab picker / re-enter).
+  const unsubLang = ctx.onLangChange?.(async (code) => {
+    if (await setPluginLang(code)) render();
   });
   return () => {
     unsub && unsub();

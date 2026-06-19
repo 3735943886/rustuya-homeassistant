@@ -14,3 +14,6 @@ dropin/
 # Golden is matched per-file (the golden/ dir may also hold large, real-device
 # snapshots generated ad hoc — those must stay ignored / never committed).
 !tests/golden/synthetic_snapshots.json
+# Plugin UI translation catalogs — first-party assets that must ship in the
+# wheel/drop-in, so exempt them from the *.json rule above.
+!src/rustuya_ha/manager_plugin/static/locales/*.json
