@@ -8,6 +8,10 @@ dropin/
 .rustuya-ha-backups/
 *.json
 !custom_converters/*.json
+# Personal/local converter overrides (e.g. device-specific inversion) stay out of
+# the repo. The 99_ prefix sorts last so it deep-merges on top of the curated
+# base (00_default.json). Re-ignored here so it's never accidentally committed.
+custom_converters/99_*.json
 # Test fixtures are synthetic (no private device data) — always tracked, so new
 # ones aren't silently dropped by the *.json rule above.
 !tests/fixtures/*.json
