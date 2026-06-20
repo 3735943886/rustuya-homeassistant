@@ -43,14 +43,18 @@ def setup(api):
         latest = st["latest"]
         latest.update(dps)
 
-        # Current position as a percent (0 = closed, 100 = open).
+        # Current position as a percent (0 = closed, 100 = open). May be unknown
+        # right after a (re)start: the converter only accumulates DPs it has
+        # personally seen, and a restart resets that bag — so don't gate the whole
+        # derivation on it. Command / work-state events derive a state without it;
+        # only the position-aware branches and the hard-limit clamp need it, and
+        # they guard themselves. (Gating on `raw_pos is None` here would swallow
+        # the first command after a restart until a fresh position event arrives.)
         raw_pos = latest.get(POSITION_DP)
-        if raw_pos is None:
-            return
         try:
-            pos = float(raw_pos)
+            pos = float(raw_pos) if raw_pos is not None else None
         except (TypeError, ValueError):
-            return
+            pos = None
 
         # Which DP changed this event decides what we can infer.
         state = None
@@ -64,18 +68,21 @@ def setup(api):
                 state = "closing"
         elif SET_DP in dps:
             try:
-                state = "opening" if float(dps[SET_DP]) > pos else "closing"
+                if pos is not None:
+                    state = "opening" if float(dps[SET_DP]) > pos else "closing"
             except (TypeError, ValueError):
                 pass
         elif WORK_DP in dps:
             w = dps[WORK_DP]
             if w in ("opening", "closing"):
                 state = w
-        elif POSITION_DP in dps:
+        elif POSITION_DP in dps and pos is not None:
             state = "closed" if pos <= 0 else "open"
 
         # At a hard limit the motor can't move further → it has stopped.
-        if (pos <= 0 and state == "closing") or (pos >= 100 and state == "opening"):
+        if pos is not None and (
+            (pos <= 0 and state == "closing") or (pos >= 100 and state == "opening")
+        ):
             state = "stopped"
 
         # The bridge republishes each DP on several event streams (active /
