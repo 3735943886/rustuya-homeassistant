@@ -503,3 +503,97 @@ def test_register_refuses_incompatible_api_version():
     ctx = FakeCtx(api_version=0)
     assert register(ctx) is None
     assert ctx.subscriptions == []
+
+
+# ── code converters (api_version >= 2 reactive runtime) ──────────────────
+class _RuntimeCtx:
+    """Fake host implementing the api_version>=2 reactive runtime: enough to
+    exercise the ConverterApi facade (on_product/on_device/derive). `emit`
+    mirrors the manager's _dispatch_dp_watchers fan-out."""
+
+    def __init__(self, devices, api_version=2):
+        self.api_version = api_version
+        self._devices = {d["id"]: d for d in devices}
+        self.watchers = []   # (device_id|None, dp|None, handler)
+        self.derived = []    # (device_id, dp, value)
+
+    def devices(self):
+        return dict(self._devices)
+
+    def watch_dps(self, handler):
+        self.watchers.append((None, None, handler))
+
+    def watch_device(self, device_id, handler):
+        self.watchers.append((device_id, None, handler))
+
+    def watch_dp(self, device_id, dp, handler):
+        self.watchers.append((device_id, dp, handler))
+
+    def derived_dp(self, device_id, dp, *, retain=None):
+        rec = self.derived
+
+        class _D:
+            async def set(self, value):
+                rec.append((device_id, dp, value))
+
+            async def clear(self):
+                rec.append((device_id, dp, None))
+
+        return _D()
+
+    async def emit(self, device_id, dps, origin="device"):
+        for did, dp, handler in self.watchers:
+            if did is not None and did != device_id:
+                continue
+            if dp is not None and dp not in dps:
+                continue
+            await handler(device_id, dps, origin)
+
+
+def test_on_product_filters_by_product_and_keeps_per_device_state():
+    from rustuya_ha.manager_plugin.code_converters import ConverterApi
+
+    ctx = _RuntimeCtx([
+        {"id": "dev-a", "product_id": "P"},
+        {"id": "dev-b", "product_id": "P"},
+        {"id": "dev-c", "product_id": "Q"},
+    ])
+    api = ConverterApi(ctx, {})  # no JSON mapping needed
+    seen = []
+
+    @api.on_product("P")
+    async def _(device_id, dps, origin):
+        seen.append(device_id)
+        await api.derive(device_id, "99", dps.get("1"))
+
+    async def run():
+        await ctx.emit("dev-c", {"1": "x"})  # product Q → skipped entirely
+        await ctx.emit("dev-a", {"1": "a"})  # product P → handled
+        await ctx.emit("dev-b", {"1": "b"})  # product P → handled, independent
+
+    asyncio.run(run())
+    assert seen == ["dev-a", "dev-b"]
+    assert ctx.derived == [("dev-a", "99", "a"), ("dev-b", "99", "b")]
+
+
+def test_load_code_converters_runs_setup_and_gates_on_api_version(monkeypatch, tmp_path):
+    from rustuya_ha.manager_plugin import code_converters
+
+    d = _isolated_converters(monkeypatch, tmp_path)
+    (d / "cc.py").write_text(
+        "def setup(api):\n"
+        "    @api.on_product('P')\n"
+        "    async def _(device_id, dps, origin):\n"
+        "        await api.derive(device_id, '99', dps.get('1'))\n",
+        encoding="utf-8",
+    )
+    devices = [{"id": "dev-a", "product_id": "P"}]
+
+    old = _RuntimeCtx(devices, api_version=1)  # too old → no-op, nothing wired
+    assert code_converters.load_code_converters(old) == 0
+    assert old.watchers == []
+
+    ctx = _RuntimeCtx(devices, api_version=2)  # loaded + wired
+    assert code_converters.load_code_converters(ctx) == 1
+    asyncio.run(ctx.emit("dev-a", {"1": "v"}))
+    assert ctx.derived == [("dev-a", "99", "v")]

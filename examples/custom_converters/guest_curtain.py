@@ -1,26 +1,30 @@
 """Example code converter — derive a Home Assistant cover state from a Tuya
-curtain motor's raw DPs.
+curtain motor's raw DPs, for a whole device *model* (by product_id).
 
 Copy this into your `custom_converters/` directory (next to the JSON converters)
-and set `DEVICE` to your curtain's device id. It reproduces the classic helper:
-fold the control / set-position / position / work-state DPs into one cover state
-(opening / closing / open / closed / stopped) — accounting for an *inverted*
-motor — and publish it as a derived DP. The manager renders the topic; here we
-only send `(dp, value)`.
+and set `PRODUCT` to your curtain model's product_id — the same key you used in
+the JSON converter that carries the cover override. Every device of that model
+is served by this one converter; state is kept per device id. It folds the
+control / set-position / position / work-state DPs into one cover state
+(opening / closing / open / closed / stopped) and publishes it as a derived DP.
+The manager renders the topic; here we only send `(dp, value)`.
+
+Why product_id and not a device id: same model → same DP layout, so one
+converter covers all units (guest curtain, bedroom curtain, …) without editing
+a device list. To target a single device instead, swap
+`@api.on_product(PRODUCT)` for `@api.on_device("<device id>")` and drop the
+per-device state dict (a single bag is then enough).
 
 Why the logic isn't a one-liner: the work-state DP only ever reports
 opening/closing, so "stopped" and the resting open/closed states have to be
-inferred from the other DPs plus the hard-limit clamp. The `inverted` flag is
-read from the device's own JSON converter
-(`discovery_overrides.cover.invert_position`) — the same flag that drives
-discovery also drives this derivation, so there's one source of truth.
+inferred from the other DPs plus the hard-limit clamp.
 
 Needs manager api_version >= 2 (the plugin runtime). Loaded once at startup;
 edit + restart the manager to apply changes.
 """
 
-# ── configure for your device ────────────────────────────────────────────
-DEVICE = "eba796ada03c1aeb00cfah"  # ← your curtain's device id
+# ── configure for your device model ──────────────────────────────────────
+PRODUCT = "your_curtain_product_id"  # ← product_id (the JSON converter's key)
 CONTROL_DP = "1"   # open / close / stop
 SET_DP = "2"       # target position (raw %)
 POSITION_DP = "3"  # current position (raw %)
@@ -29,22 +33,22 @@ OUT_DP = "99"      # derived cover-state output
 
 
 def setup(api):
-    cover = (api.converter(api.product_id(DEVICE)) or {}).get("discovery_overrides", {}).get("cover", {})
-    inverted = bool(cover.get("invert_position"))
+    # One handler serves every device of this model, so state is keyed by
+    # device id: {device_id: {"latest": {dp: val}, "emitted": last_state}}.
+    by_device = {}
 
-    latest = {}  # last value seen for each DP, held across events
-    emitted = {"state": None}  # last derived state actually published
-
-    @api.on_device(DEVICE)
+    @api.on_product(PRODUCT)
     async def _(device_id, dps, origin):
+        st = by_device.setdefault(device_id, {"latest": {}, "emitted": None})
+        latest = st["latest"]
         latest.update(dps)
 
-        # Current position in HA "open%" terms (0 = closed, 100 = open).
+        # Current position as a percent (0 = closed, 100 = open).
         raw_pos = latest.get(POSITION_DP)
         if raw_pos is None:
             return
         try:
-            pos = (100 - float(raw_pos)) if inverted else float(raw_pos)
+            pos = float(raw_pos)
         except (TypeError, ValueError):
             return
 
@@ -55,22 +59,18 @@ def setup(api):
             if cmd == "stop":
                 state = "stopped"
             elif cmd == "open":
-                state = "closing" if inverted else "opening"
+                state = "opening"
             elif cmd == "close":
-                state = "opening" if inverted else "closing"
+                state = "closing"
         elif SET_DP in dps:
             try:
-                target = float(dps[SET_DP])
-                target = (100 - target) if inverted else target
-                state = "opening" if target > pos else "closing"
+                state = "opening" if float(dps[SET_DP]) > pos else "closing"
             except (TypeError, ValueError):
                 pass
         elif WORK_DP in dps:
             w = dps[WORK_DP]
-            if w == "opening":
-                state = "closing" if inverted else "opening"
-            elif w == "closing":
-                state = "opening" if inverted else "closing"
+            if w in ("opening", "closing"):
+                state = w
         elif POSITION_DP in dps:
             state = "closed" if pos <= 0 else "open"
 
@@ -82,6 +82,6 @@ def setup(api):
         # passive / state), so this handler fires more than once for one real
         # change. Publish only when the derived state actually changes — the
         # output is idempotent regardless of how many streams echo the input.
-        if state is not None and state != emitted["state"]:
-            emitted["state"] = state
+        if state is not None and state != st["emitted"]:
+            st["emitted"] = state
             await api.derive(device_id, OUT_DP, state)

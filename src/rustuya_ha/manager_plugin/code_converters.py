@@ -90,6 +90,24 @@ class ConverterApi:
 
         return deco
 
+    def on_product(self, product_id: str):
+        """Decorator: `handler(device_id, dps, origin)` for *every* device whose
+        product_id matches — one converter serving a whole device model. The
+        handler is called with each matching device's id, so keep per-device
+        state keyed by `device_id` (a closure dict) rather than a single bag."""
+
+        def deco(handler):
+            h = _as_async(handler)
+
+            async def _w(device_id, dps, origin):
+                if self.product_id(device_id) == product_id:
+                    await h(device_id, dps, origin)
+
+            self._ctx.watch_dps(_w)
+            return handler
+
+        return deco
+
     def on_any(self, handler):
         """Register `handler(device_id, dps, origin)` for every device's events."""
         self._ctx.watch_dps(_as_async(handler))

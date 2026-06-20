@@ -14,6 +14,7 @@ load at startup; unlike JSON they don't hot-reload).
 ## `api` surface (passed to `setup(api)`)
 
 - `@api.on_device(id)` — `handler(device_id, dps, origin)` for one device's events
+- `@api.on_product(product_id)` — same, for every device of one model (product_id)
 - `@api.on_dp(id, dp)` — `handler(device_id, value)` when that DP changes
 - `api.on_any(handler)` — every device's events
 - `await api.derive(id, dp, value)` — publish a derived DP (manager renders the topic)
@@ -25,5 +26,5 @@ load at startup; unlike JSON they don't hot-reload).
 ## Files
 
 - [`guest_curtain.py`](guest_curtain.py) — derive a Home Assistant cover state
-  (opening/closing/open/closed/stopped) from an inverted Tuya curtain motor's raw
-  DPs, reading the `invert_position` flag from the device's own JSON converter.
+  (opening/closing/open/closed/stopped) from a Tuya curtain motor's raw DPs, for
+  a whole device model (by product_id), with per-device state.
