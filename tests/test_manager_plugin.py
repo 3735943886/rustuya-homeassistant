@@ -377,103 +377,112 @@ def test_list_backups_caps_to_limit(tmp_path):
 
 # ── custom converters editing (M5) ───────────────────────────────────────
 def _isolated_converters(monkeypatch, tmp_path):
-    """Point converter resolution at a non-existent tmp file (empty mapping),
-    so tests don't read/write the repo's or the packaged converters."""
-    conv = tmp_path / "conv.json"
-    monkeypatch.setenv("RUSTUYA_CONVERTERS", str(conv))
-    return conv
+    """Point converter resolution at an empty tmp *directory* (the drop-in model),
+    so tests don't read/write the repo's or packaged converters."""
+    d = tmp_path / "custom_converters"
+    d.mkdir()
+    monkeypatch.setenv("RUSTUYA_CONVERTERS", str(d))
+    return d
 
 
-def test_converters_info_lists_fleet_products(monkeypatch, tmp_path):
+def test_converters_files_lists_fleet_products(monkeypatch, tmp_path):
     _isolated_converters(monkeypatch, tmp_path)
     ctx = FakeCtx(devices=DEVICES, bridge_cfg=LEGACY_CFG)
     p = DiscoveryPlugin(ctx)
-    info = p.converters_info()
+    info = p.converters_files()
     pids = {pr["product_id"] for pr in info["products"]}
     assert pids == {d["product_id"] for d in DEVICES if d.get("product_id")}
-    assert all(pr["has_override"] is False for pr in info["products"])  # empty file
-    assert info["converters"] == {}
+    assert all(pr["has_override"] is False for pr in info["products"])  # empty dir
+    assert info["files"] == []
 
 
-def test_preview_converter_applies_override(monkeypatch, tmp_path):
-    _isolated_converters(monkeypatch, tmp_path)
-    ctx = FakeCtx(devices=DEVICES, bridge_cfg=LEGACY_CFG)
-    p = DiscoveryPlugin(ctx)
-    pid = DEVICES[0]["product_id"]
-    base = p.preview_converter(pid, None)
-    over = p.preview_converter(pid, {"model": "ZZZ-CUSTOM"})
-    assert over != base
-    assert "ZZZ-CUSTOM" in json.dumps(over)  # custom model flows into the payload
-    assert over["devices"] and all("error" not in d for d in over["devices"])
-
-
-def test_preview_converter_rejects_non_dict(monkeypatch, tmp_path):
-    _isolated_converters(monkeypatch, tmp_path)
-    p = DiscoveryPlugin(FakeCtx(devices=DEVICES, bridge_cfg=LEGACY_CFG))
-    with pytest.raises(ValueError, match="JSON object"):
-        p.preview_converter(DEVICES[0]["product_id"], ["not", "a", "dict"])
-
-
-def test_save_converter_persists_backs_up_and_reloads(monkeypatch, tmp_path):
-    conv = _isolated_converters(monkeypatch, tmp_path)
+def test_save_converter_file_persists_backs_up_and_reloads(monkeypatch, tmp_path):
+    d = _isolated_converters(monkeypatch, tmp_path)
     ctx = FakeCtx(devices=DEVICES, bridge_cfg=LEGACY_CFG)
     p = DiscoveryPlugin(ctx)
     p.backup_dir = str(tmp_path / "bk")
     pid = DEVICES[0]["product_id"]
 
-    res = p.save_converter(pid, {"model": "SAVED-Y"})
-    assert res["saved"] and res["deleted"] is False and res["backup"] is None  # no prior file
-    assert json.load(open(conv))[pid]["model"] == "SAVED-Y"
+    res = p.save_converter_file("a.json", json.dumps({pid: {"model": "SAVED-Y"}}))
+    assert res["kind"] == "json" and res["restart_required"] is False
+    assert res["backup"] is None  # no prior file
+    assert json.load(open(d / "a.json"))[pid]["model"] == "SAVED-Y"
     # generator reloaded from disk → it now applies the saved override
     payloads, _ = p.generator.generate(DEVICES[0])
     assert "SAVED-Y" in json.dumps(payloads)
 
-    # second save backs up the prior file
-    res2 = p.save_converter(pid, {"model": "SAVED-Z"})
+    # overwriting the same file backs up the prior version
+    res2 = p.save_converter_file("a.json", json.dumps({pid: {"model": "SAVED-Z"}}))
     assert res2["backup"] is not None and Path(res2["backup"]).is_file()
 
-    # delete removes the product's override
-    res3 = p.save_converter(pid, None)
-    assert res3["deleted"] is True and pid not in json.load(open(conv))
+    # listing + reading the file back
+    info = p.converters_files()
+    assert {f["name"] for f in info["files"]} == {"a.json"}
+    assert "SAVED-Z" in p.read_converter_file("a.json")["content"]
+
+    # delete removes the file (and its overrides)
+    res3 = p.delete_converter_file("a.json")
+    assert res3["deleted"] is True and not (d / "a.json").exists()
+    assert p.converters_files()["files"] == []
 
 
-def test_save_converter_refuses_broken_override(monkeypatch, tmp_path):
-    conv = _isolated_converters(monkeypatch, tmp_path)
+def test_save_converter_file_py_needs_restart_and_compiles(monkeypatch, tmp_path):
+    d = _isolated_converters(monkeypatch, tmp_path)
     p = DiscoveryPlugin(FakeCtx(devices=DEVICES, bridge_cfg=LEGACY_CFG))
     p.backup_dir = str(tmp_path / "bk")
-    with pytest.raises(ValueError):
-        p.save_converter(DEVICES[0]["product_id"], {"dp_meta": "not-a-dict"})
-    assert not conv.exists()  # nothing persisted on refusal
+    res = p.save_converter_file("hook.py", "def setup(api):\n    pass\n")
+    assert res["kind"] == "py" and res["restart_required"] is True
+    assert (d / "hook.py").read_text().startswith("def setup")
+    # a .py listed alongside .json, both surfaced by converters_files
+    p.save_converter_file("x.json", "{}")
+    assert {f["name"] for f in p.converters_files()["files"]} == {"hook.py", "x.json"}
 
 
-def test_save_all_converters_replaces_whole_file(monkeypatch, tmp_path):
-    conv = _isolated_converters(monkeypatch, tmp_path)
+def test_save_converter_file_rejects_bad_content(monkeypatch, tmp_path):
+    d = _isolated_converters(monkeypatch, tmp_path)
+    p = DiscoveryPlugin(FakeCtx(devices=DEVICES, bridge_cfg=LEGACY_CFG))
+    p.backup_dir = str(tmp_path / "bk")
+    with pytest.raises(ValueError):  # override that breaks generation
+        p.save_converter_file(
+            "bad.json", json.dumps({DEVICES[0]["product_id"]: {"dp_meta": "not-a-dict"}})
+        )
+    with pytest.raises(ValueError, match="syntax"):  # Python that won't compile
+        p.save_converter_file("bad.py", "def setup(api:\n")
+    with pytest.raises(ValueError):  # path traversal
+        p.save_converter_file("../escape.json", "{}")
+    assert list(d.iterdir()) == []  # nothing persisted on any refusal
+
+
+def test_save_converter_file_replaces_file(monkeypatch, tmp_path):
+    d = _isolated_converters(monkeypatch, tmp_path)
     ctx = FakeCtx(devices=DEVICES, bridge_cfg=LEGACY_CFG)
     p = DiscoveryPlugin(ctx)
     p.backup_dir = str(tmp_path / "bk")
     pid = DEVICES[0]["product_id"]
 
-    res = p.save_all_converters({pid: {"model": "ALL-Y"}})
-    assert res["saved"] and res["count"] == 1
-    assert json.load(open(conv)) == {pid: {"model": "ALL-Y"}}
+    res = p.save_converter_file("c.json", json.dumps({pid: {"model": "ALL-Y"}}))
+    assert res["restart_required"] is False
+    assert json.load(open(d / "c.json")) == {pid: {"model": "ALL-Y"}}
     payloads, _ = p.generator.generate(DEVICES[0])
     assert "ALL-Y" in json.dumps(payloads)
 
-    # a full-file replace overwrites prior content (and backs it up)
-    res2 = p.save_all_converters({})
-    assert res2["count"] == 0 and res2["backup"] is not None
-    assert json.load(open(conv)) == {}
+    # rewriting the same file replaces its content (and backs it up)
+    res2 = p.save_converter_file("c.json", "{}")
+    assert res2["backup"] is not None
+    assert json.load(open(d / "c.json")) == {}
 
 
-def test_save_all_converters_rejects_bad_shape(monkeypatch, tmp_path):
-    conv = _isolated_converters(monkeypatch, tmp_path)
+def test_save_converter_file_rejects_bad_json_shape(monkeypatch, tmp_path):
+    d = _isolated_converters(monkeypatch, tmp_path)
     p = DiscoveryPlugin(FakeCtx(devices=DEVICES, bridge_cfg=LEGACY_CFG))
     p.backup_dir = str(tmp_path / "bk")
-    with pytest.raises(ValueError, match="product_id"):
-        p.save_all_converters(["not", "a", "dict"])
+    with pytest.raises(ValueError, match="object of product_id"):
+        p.save_converter_file("x.json", json.dumps(["not", "a", "dict"]))
     with pytest.raises(ValueError, match="must be a JSON object"):
-        p.save_all_converters({DEVICES[0]["product_id"]: "not-a-dict"})
-    assert not conv.exists()
+        p.save_converter_file("y.json", json.dumps({DEVICES[0]["product_id"]: "not-a-dict"}))
+    with pytest.raises(ValueError, match="invalid JSON"):
+        p.save_converter_file("z.json", "{not json")
+    assert list(d.iterdir()) == []
 
 
 # ── register() wiring (needs fastapi) ────────────────────────────────────

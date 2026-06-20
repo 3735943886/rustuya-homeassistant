@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rustuya-homeassistant"
-version = "0.0.1rc6"
+version = "0.0.1rc7"
 description = "Generate & sync Home Assistant MQTT discovery for rustuya-bridge Tuya devices"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -50,9 +50,6 @@ rustuya-ha = "rustuya_ha.cli.app:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/rustuya_ha"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"src/rustuya_ha/data/custom_converters.json" = "rustuya_ha/data/custom_converters.json"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

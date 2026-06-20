@@ -939,6 +939,10 @@ function renderErrors(data) {
 }
 
 // ── custom converters editor (M5) ────────────────────────────────────────
+// ── custom converters editor — a file browser over custom_converters/ ─────
+// Lists the *.json (merged) + *.py (code) files on disk; pick one to edit its
+// raw text, "＋" to add a new file, save/delete per file. JSON applies on save
+// (hot reload); a .py change needs a manager restart (flagged by the API).
 function jsonPretty(obj) {
   try {
     return JSON.stringify(obj, null, 2);
@@ -947,138 +951,116 @@ function jsonPretty(obj) {
   }
 }
 
-const ALL_CONV = "__all__"; // pseudo-selection: edit the whole converters file
-
-function selectProduct(view, pid) {
+async function loadConvFiles(ctx, view, rerender) {
   const c = view.conv;
-  c.selected = pid;
-  if (pid === ALL_CONV) {
-    c.text = jsonPretty((c.info && c.info.converters) || {});
-  } else {
-    const existing = c.info && c.info.converters ? c.info.converters[pid] : null;
-    c.text = existing ? jsonPretty(existing) : jsonPretty({ model: "", dp_meta: {} });
-  }
-  c.preview = null;
-}
-
-async function loadConverters(ctx, view, rerender) {
-  view.conv.busy = true;
+  c.busy = true;
   rerender();
   try {
     const info = await ctx.api("/api/discovery/converters");
-    view.conv.info = info;
-    view.conv.loaded = true;
-    const pids = (info.products || []).map((p) => p.product_id);
-    const keep =
-      view.conv.selected === ALL_CONV || (view.conv.selected && pids.includes(view.conv.selected))
-        ? view.conv.selected
-        : ALL_CONV; // default to the whole-file ("All") view; a stale per-product pick also falls back here
-    selectProduct(view, keep);
+    c.dir = info.dir || "";
+    c.files = info.files || [];
+    c.products = info.products || [];
+    c.loaded = true;
+    // Drop a selection that no longer exists on disk (unless mid-create).
+    if (c.selected && !c.creating && !c.files.some((f) => f.name === c.selected)) {
+      c.selected = null;
+      c.content = "";
+    }
   } catch (e) {
     ctx.toast && ctx.toast(`${t("conv.label")}: ${e.message}`, "error");
   } finally {
-    view.conv.busy = false;
+    c.busy = false;
     rerender();
   }
 }
 
-function parseOverride(text) {
-  const t = text.trim();
-  if (t === "" || t === "null") return null; // null = delete the override
-  return JSON.parse(t); // throws on malformed JSON (caller toasts)
+async function openConvFile(ctx, view, name, rerender) {
+  const c = view.conv;
+  try {
+    const f = await ctx.api(`/api/discovery/converters/file?name=${encodeURIComponent(name)}`);
+    c.selected = f.name;
+    c.kind = f.kind;
+    c.content = f.content;
+    c.creating = false;
+    c.dirty = false;
+    rerender();
+  } catch (e) {
+    ctx.toast && ctx.toast(`${t("conv.label")}: ${e.message}`, "error");
+  }
 }
 
-async function convAction(ctx, view, rerender, kind) {
+function startNewConvFile(view, rerender) {
+  const c = view.conv;
+  c.creating = true;
+  c.selected = null;
+  c.newName = "";
+  c.content = "";
+  c.kind = "json";
+  c.dirty = false;
+  rerender();
+}
+
+async function saveConvFile(ctx, view, rerender) {
+  const c = view.conv;
+  const name = (c.creating ? c.newName : c.selected || "").trim();
+  if (!name) {
+    ctx.toast && ctx.toast(t("conv.needName"), "error");
+    return;
+  }
+  if (!/\.(json|py)$/.test(name)) {
+    ctx.toast && ctx.toast(t("conv.badName"), "error");
+    return;
+  }
+  try {
+    const res = await ctx.api("/api/discovery/converters/file", {
+      method: "POST",
+      body: { name, content: c.content },
+    });
+    ctx.toast &&
+      ctx.toast(t("conv.savedFile", { name: res.name }) + (res.backup ? t("toast.backupSuffix") : ""), "ok");
+    if (res.restart_required) ctx.toast && ctx.toast(t("conv.restartNote"), "ok");
+    c.creating = false;
+    c.selected = res.name;
+    c.kind = res.kind;
+    c.dirty = false;
+    await loadConvFiles(ctx, view, rerender);
+  } catch (e) {
+    ctx.toast && ctx.toast(`${t("common.save")}: ${e.message}`, "error");
+  }
+}
+
+async function deleteConvFile(ctx, view, rerender) {
   const c = view.conv;
   if (!c.selected) return;
-  // All-mode: the textarea is the whole converters file; Save replaces it.
-  if (c.selected === ALL_CONV) {
-    if (kind !== "save") return; // preview/delete are per-product only
-    let mapping;
-    try {
-      mapping = JSON.parse(c.text.trim() || "{}");
-    } catch (e) {
-      ctx.toast && ctx.toast(`${t("conv.invalidJson")}: ${e.message}`, "error");
-      return;
-    }
-    const ok = ctx.confirm
-      ? await ctx.confirm({
-          title: t("conv.saveAllTitle"),
-          message: t("conv.saveAllMsg"),
-          okLabel: t("action.saveAll"),
-          danger: true,
-        })
-      : true;
-    if (!ok) return;
-    try {
-      const res = await ctx.api("/api/discovery/converters/save_all", { method: "POST", body: { converters: mapping } });
-      ctx.toast && ctx.toast(t("conv.savedAll", { count: res.count }) + (res.backup ? t("toast.backupSuffix") : ""), "ok");
-      await loadConverters(ctx, view, rerender);
-    } catch (e) {
-      ctx.toast && ctx.toast(`${t("action.saveAll")}: ${e.message}`, "error");
-    }
-    return;
-  }
-  let override;
-  try {
-    override = kind === "delete" ? null : parseOverride(c.text);
-  } catch (e) {
-    ctx.toast && ctx.toast(`${t("conv.invalidJson")}: ${e.message}`, "error");
-    return;
-  }
-  if (kind === "preview") {
-    try {
-      c.preview = await ctx.api("/api/discovery/converters/preview", {
-        method: "POST",
-        body: { product_id: c.selected, override },
-      });
-      rerender();
-    } catch (e) {
-      ctx.toast && ctx.toast(`${t("action.preview")}: ${e.message}`, "error");
-    }
-    return;
-  }
-  const msg = kind === "delete"
-    ? t("conv.deleteMsg", { pid: c.selected })
-    : t("conv.saveMsg", { pid: c.selected });
+  const name = c.selected;
   const ok = ctx.confirm
-    ? await ctx.confirm({ title: t("conv.actionTitle", { action: t("action." + kind) }), message: msg, okLabel: t("action." + kind), danger: kind === "delete" })
+    ? await ctx.confirm({
+        title: t("conv.deleteFileTitle"),
+        message: t("conv.deleteFileMsg", { name }),
+        okLabel: t("action.delete"),
+        danger: true,
+      })
     : true;
   if (!ok) return;
   try {
-    const res = await ctx.api("/api/discovery/converters/save", {
-      method: "POST",
-      body: { product_id: c.selected, override },
-    });
+    const res = await ctx.api("/api/discovery/converters/file/delete", { method: "POST", body: { name } });
     ctx.toast &&
-      ctx.toast((res.deleted ? t("conv.deleted") : t("conv.saved")) + (res.backup ? t("toast.backupSuffix") : ""), "ok");
-    await loadConverters(ctx, view, rerender); // refresh has-override + canonical text
+      ctx.toast(t("conv.deletedFile", { name }) + (res.backup ? t("toast.backupSuffix") : ""), "ok");
+    c.selected = null;
+    c.content = "";
+    c.creating = false;
+    await loadConvFiles(ctx, view, rerender);
   } catch (e) {
-    ctx.toast && ctx.toast(`${t("action." + kind)}: ${e.message}`, "error");
+    ctx.toast && ctx.toast(`${t("action.delete")}: ${e.message}`, "error");
   }
 }
 
-function renderConvPreview(preview) {
-  const box = el("div", "mt-2 p-2 rounded bg-slate-50 dark:bg-slate-800/40 text-xs space-y-2");
-  box.appendChild(
-    el("div", "font-medium", t("conv.previewTitle", { pid: preview.product_id, count: (preview.devices || []).length })),
-  );
-  for (const d of preview.devices || []) {
-    const b = el("div");
-    if (d.error) {
-      b.appendChild(el("div", "text-rose-600 dark:text-rose-400", t("conv.previewError", { name: d.name, id: d.id, error: d.error })));
-    } else {
-      const topics = Object.keys(d.topics || {});
-      b.appendChild(
-        el("div", "font-medium", t("conv.previewDevice", { name: d.name, id: d.id, count: topics.length, source: d.source || "" })),
-      );
-      const pre = el("pre", "font-mono whitespace-pre-wrap break-all text-slate-500 dark:text-slate-400");
-      pre.textContent = jsonPretty(d.topics);
-      b.appendChild(pre);
-    }
-    box.appendChild(b);
-  }
-  return box;
+function convFileChip(f, active, onClick) {
+  const badge = f.kind === "py" ? "🐍" : "{}";
+  const cls = active
+    ? "bg-slate-700 text-white border-slate-700 dark:bg-slate-200 dark:text-slate-900 dark:border-slate-200"
+    : "bg-white text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-600";
+  return btn(`${badge} ${f.name}`, `px-2 py-1 rounded border text-xs font-mono ${cls}`, onClick);
 }
 
 function renderConverters(ctx, view, rerender) {
@@ -1087,7 +1069,7 @@ function renderConverters(ctx, view, rerender) {
   wrap.appendChild(
     btn(`${c.open ? "▾" : "▸"} ${t("conv.section")}`, "text-sm font-semibold mb-2", () => {
       c.open = !c.open;
-      if (c.open && !c.loaded) loadConverters(ctx, view, rerender);
+      if (c.open && !c.loaded) loadConvFiles(ctx, view, rerender);
       else rerender();
     }),
   );
@@ -1096,67 +1078,82 @@ function renderConverters(ctx, view, rerender) {
     wrap.appendChild(el("div", "text-xs text-slate-500", c.busy ? t("common.loading") : ""));
     return wrap;
   }
-  const info = c.info || { products: [], converters: {}, save_path: "" };
 
-  const isAll = c.selected === ALL_CONV;
-
-  const row = el("div", "flex flex-wrap gap-2 items-center mb-2");
-  const sel = el("select", SELECT_CLS);
-  // "All" lets you see/edit the whole converters file in one JSON blob.
-  const allOpt = el("option", null, t("conv.all"));
-  allOpt.value = ALL_CONV;
-  if (isAll) allOpt.selected = true;
-  sel.appendChild(allOpt);
-  for (const pr of info.products) {
-    const o = el(
-      "option",
-      null,
-      t("conv.product", { pid: pr.product_id, count: pr.device_ids.length }) + (pr.has_override ? " ✏" : ""),
+  // File chips + "＋ new file".
+  const list = el("div", "flex flex-wrap gap-1 mb-2 items-center");
+  for (const f of c.files) {
+    list.appendChild(
+      convFileChip(f, !c.creating && f.name === c.selected, () => openConvFile(ctx, view, f.name, rerender)),
     );
-    o.value = pr.product_id;
-    if (pr.product_id === c.selected) o.selected = true;
-    sel.appendChild(o);
   }
-  sel.addEventListener("change", () => {
-    selectProduct(view, sel.value);
-    rerender();
-  });
-  row.appendChild(sel);
-  wrap.appendChild(row);
-
-  const ta = el(
-    "textarea",
-    "w-full h-48 font-mono text-xs p-2 rounded border border-slate-300 dark:border-slate-600 " +
-      "bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100",
+  const addCls = c.creating
+    ? "bg-slate-700 text-white border-slate-700 dark:bg-slate-200 dark:text-slate-900"
+    : "border-dashed border-slate-400 text-slate-500 dark:text-slate-400";
+  list.appendChild(
+    btn(`＋ ${t("conv.newFile")}`, `px-2 py-1 rounded border text-xs ${addCls}`, () =>
+      startNewConvFile(view, rerender),
+    ),
   );
-  ta.value = c.text;
-  ta.dataset.keepFocus = "conv-text";
-  ta.spellcheck = false;
-  ta.placeholder = isAll ? t("conv.phAll") : t("conv.phOne");
-  ta.addEventListener("input", () => {
-    c.text = ta.value;
-  });
-  wrap.appendChild(ta);
+  wrap.appendChild(list);
 
-  const acts = el("div", "flex flex-wrap gap-2 mt-2 items-center");
-  // Preview is per-product (regenerates that product's devices); not meaningful
-  // for the whole-file edit.
-  const previewBtn = btn(t("conv.preview"), BTN_GHOST, () => convAction(ctx, view, rerender, "preview"));
-  const saveBtn = btn(t("common.save"), BTN_PRIMARY, () => convAction(ctx, view, rerender, "save"));
-  previewBtn.disabled = isAll;
-  saveBtn.disabled = false;
-  acts.appendChild(previewBtn);
-  acts.appendChild(saveBtn);
-  if (!isAll && c.selected && info.converters && c.selected in info.converters) {
-    acts.appendChild(btn(t("conv.deleteOverride"), BTN_DANGER, () => convAction(ctx, view, rerender, "delete")));
+  if (c.creating || c.selected) {
+    if (c.creating) {
+      const nameInput = el(
+        "input",
+        "w-full text-xs font-mono px-2 py-1 mb-2 rounded border border-slate-300 dark:border-slate-600 " +
+          "bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100",
+      );
+      nameInput.placeholder = t("conv.filenamePh");
+      nameInput.value = c.newName || "";
+      nameInput.dataset.keepFocus = "conv-name";
+      nameInput.addEventListener("input", () => {
+        c.newName = nameInput.value;
+      });
+      wrap.appendChild(nameInput);
+    }
+    const ta = el(
+      "textarea",
+      "w-full h-48 font-mono text-xs p-2 rounded border border-slate-300 dark:border-slate-600 " +
+        "bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100",
+    );
+    ta.value = c.content;
+    ta.dataset.keepFocus = "conv-text";
+    ta.spellcheck = false;
+    ta.placeholder = t("conv.contentPh");
+    ta.addEventListener("input", () => {
+      c.content = ta.value;
+      c.dirty = true;
+    });
+    wrap.appendChild(ta);
+
+    const acts = el("div", "flex flex-wrap gap-2 mt-2 items-center");
+    acts.appendChild(btn(t("common.save"), BTN_PRIMARY, () => saveConvFile(ctx, view, rerender)));
+    if (!c.creating && c.selected) {
+      acts.appendChild(btn(t("conv.deleteFile"), BTN_DANGER, () => deleteConvFile(ctx, view, rerender)));
+    }
+    acts.appendChild(el("span", "text-xs text-slate-400 ml-auto break-all", t("conv.dir", { path: c.dir || "?" })));
+    wrap.appendChild(acts);
+  } else {
+    wrap.appendChild(
+      el(
+        "div",
+        "text-xs text-slate-500 dark:text-slate-400 py-2",
+        c.files.length ? t("conv.pickFile") : t("conv.noFiles"),
+      ),
+    );
   }
-  acts.appendChild(el("span", "text-xs text-slate-400 ml-auto", t("conv.savesTo", { path: info.save_path || "?" })));
-  wrap.appendChild(acts);
 
-  if (c.preview) wrap.appendChild(renderConvPreview(c.preview));
+  // Authoring aid: the fleet's product_ids (✏ = a JSON converter already covers it).
+  if (c.products.length) {
+    const ref = el("div", "mt-2 text-[11px] text-slate-400 dark:text-slate-500 break-all");
+    ref.appendChild(el("span", "font-medium", `${t("conv.products")}: `));
+    ref.appendChild(
+      el("span", "font-mono", c.products.map((p) => p.product_id + (p.has_override ? "✏" : "")).join("  ")),
+    );
+    wrap.appendChild(ref);
+  }
   return wrap;
 }
-
 export async function mount(rootEl, ctx) {
   rootEl.innerHTML = "";
   // No horizontal padding: the manager's <main> already supplies px-4, and its
@@ -1189,7 +1186,10 @@ export async function mount(rootEl, ctx) {
   // they survive a reload, like the manager's filter/sort.
   const view = {
     search: "", filters: loadFilters(), sort: loadSort(), expanded: new Set(),
-    conv: { open: false, loaded: false, info: null, selected: "", text: "", preview: null, busy: false },
+    conv: {
+      open: false, loaded: false, busy: false, dir: "", files: [], products: [],
+      selected: null, content: "", kind: "json", creating: false, newName: "", dirty: false,
+    },
   };
   let lastData = null;
 

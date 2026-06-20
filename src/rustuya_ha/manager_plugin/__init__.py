@@ -302,13 +302,14 @@ class DiscoveryPlugin:
             "total": len(all_files),
         }
 
-    # ── custom converters editing (M5) ───────────────────────────────────
-    # Edits the same per-product_id override file the generator/CLI resolve
-    # (RUSTUYA_CONVERTERS / ./custom_converters.json), so UI and CLI share one
-    # source. Writes never touch the packaged example (redirected to CWD).
-    def converters_info(self) -> Dict[str, Any]:
-        """Current converters mapping + the product_ids present in the fleet
-        (with their device ids/names and whether an override exists)."""
+    # ── custom converters: file-level editing ────────────────────────────
+    # Converters live as a drop-in directory (custom_converters/) of *.json
+    # (merged by product_id) + *.py code converters. The editor browses and edits
+    # those files directly; the generator/CLI resolve the same directory.
+    def converters_files(self) -> Dict[str, Any]:
+        """The converter files on disk + the fleet's product_ids (authoring
+        context: which products exist, their devices, and whether a JSON
+        converter already mentions them)."""
         mapping = converter.load_converters()
         products: Dict[str, Dict[str, Any]] = {}
         for did, raw in self.ctx.devices().items():
@@ -323,15 +324,22 @@ class DiscoveryPlugin:
             e["device_ids"].append(did)
             e["device_names"].append(raw.get("name", did))
         return {
-            "path": str(converter.resolve_path(None)),
-            "save_path": str(converter.savable_path(None)),
-            "converters": mapping,
+            "dir": str(converter.savable_dir(None)),
+            "files": converter.list_files(),
             "products": sorted(products.values(), key=lambda x: x["product_id"]),
         }
 
+    def read_converter_file(self, name: str) -> Dict[str, Any]:
+        """Raw text of one converter file (404 via ValueError if absent)."""
+        try:
+            content = converter.read_file(name)
+        except (FileNotFoundError, OSError) as e:
+            raise ValueError(f"no such converter file: {name}") from e
+        return {"name": name, "kind": name.rsplit(".", 1)[-1], "content": content}
+
     def _generator_with(self, mapping: Dict[str, Any]):
         """A fresh generator using `mapping` as its converter overrides, with the
-        live bridge scheme applied — for previewing an unsaved edit."""
+        live bridge scheme applied — for validating an unsaved edit."""
         gen = initialize_generator()
         gen.converter.mapping = mapping
         s = self._scheme()
@@ -339,79 +347,58 @@ class DiscoveryPlugin:
             gen.scheme, gen.codec = s
         return gen
 
-    @staticmethod
-    def _validate_override(override: Any) -> None:
-        if override is not None and not isinstance(override, dict):
-            raise ValueError("override must be a JSON object (or null to delete)")
-
-    def preview_converter(self, product_id: str, override: Any) -> Dict[str, Any]:
-        """Regenerate discovery for every fleet device of `product_id` using the
-        proposed (unsaved) override. `override=None` previews removal."""
-        self._validate_override(override)
-        merged = dict(converter.load_converters())
-        if override is None:
-            merged.pop(product_id, None)
-        else:
-            merged[product_id] = override
-        gen = self._generator_with(merged)
-        devices = [r for r in self.ctx.devices().values() if r.get("product_id") == product_id]
-        out: List[Dict[str, Any]] = []
-        for d in devices:
+    def _validate_converter_file(self, name: str, content: str) -> None:
+        """Reject a file that can't be loaded: malformed JSON / Python syntax, or
+        a JSON converter that breaks generation for any of its products."""
+        if name.endswith(".json"):
             try:
-                payloads, source = gen.generate(d)
-                out.append({"id": d["id"], "name": d.get("name", d["id"]),
-                            "source": source, "topics": payloads})
-            except Exception as e:  # surface a bad override instead of 500ing
-                out.append({"id": d["id"], "name": d.get("name", d["id"]), "error": str(e)})
-        return {"product_id": product_id, "devices": out}
+                parsed = json.loads(content)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"invalid JSON: {e}") from e
+            if not isinstance(parsed, dict):
+                raise ValueError("a JSON converter must be an object of product_id -> override")
+            for pid, override in parsed.items():
+                if not isinstance(override, dict):
+                    raise ValueError(f"override for {pid} must be a JSON object")
+            gen = self._generator_with(parsed)
+            try:
+                for d in self.ctx.devices().values():
+                    if d.get("product_id") in parsed:
+                        gen.generate(d)
+            except Exception as e:  # any generation failure → 400, not a 500
+                raise ValueError(f"converter breaks generation: {e}") from e
+        elif name.endswith(".py"):
+            try:
+                compile(content, name, "exec")  # syntax-check only; never executed here
+            except SyntaxError as e:
+                raise ValueError(f"Python syntax error: {e}") from e
 
-    def save_all_converters(self, mapping: Any) -> Dict[str, Any]:
-        """Replace the *entire* converters file with `mapping` (the UI's "All"
-        editor). Validates it's product_id -> object and that nothing breaks
-        generation across the fleet, backs up the old file, then writes + reloads."""
-        if not isinstance(mapping, dict):
-            raise ValueError("converters must be a JSON object of product_id -> override")
-        for pid, override in mapping.items():
-            if not isinstance(override, dict):
-                raise ValueError(f"override for {pid} must be a JSON object")
-        gen = self._generator_with(mapping)
-        try:
-            for d in self.ctx.devices().values():
-                gen.generate(d)
-        except Exception as e:  # any generation failure → 400, not a 500
-            raise ValueError(f"converters break generation: {e}") from e
-        backup_path = backup.snapshot_file(
-            self.backup_dir, str(converter.savable_path(None)), prefix="converters"
-        )
-        path = converter.save_converters(mapping)
-        self._reload_generator()
-        return {"saved": True, "count": len(mapping), "path": path, "backup": backup_path}
+    def save_converter_file(self, name: str, content: str) -> Dict[str, Any]:
+        """Create/overwrite one converter file. Validates first (JSON shape +
+        generation, or Python syntax), backs up any prior version, writes, and —
+        for a JSON file — reloads the generator. A `.py` change needs a manager
+        restart to take effect (restart_required)."""
+        target = converter.file_path(name)  # validates the name (ValueError → 400)
+        self._validate_converter_file(name, content)
+        backup_path = backup.snapshot_file(self.backup_dir, str(target), prefix="converters")
+        path = converter.write_file(name, content)
+        is_json = name.endswith(".json")
+        if is_json:
+            self._reload_generator()
+        return {"name": target.name, "kind": "json" if is_json else "py",
+                "path": path, "backup": backup_path, "restart_required": not is_json}
 
-    def save_converter(self, product_id: str, override: Any) -> Dict[str, Any]:
-        """Persist (or delete, when `override=None`) one product_id's override.
-        Backs up the prior file, refuses an override that crashes generation,
-        then reloads the generator so subsequent status/publish use it."""
-        self._validate_override(override)
-        mapping = dict(converter.load_converters())
-        if override is None:
-            mapping.pop(product_id, None)
-        else:
-            mapping[product_id] = override
-        # Refuse to persist an override that breaks generation for its devices.
-        gen = self._generator_with(mapping)
-        try:
-            for d in self.ctx.devices().values():
-                if d.get("product_id") == product_id:
-                    gen.generate(d)
-        except Exception as e:  # any generation failure → 400, not a 500
-            raise ValueError(f"override breaks generation: {e}") from e
-        backup_path = backup.snapshot_file(
-            self.backup_dir, str(converter.savable_path(None)), prefix="converters"
-        )
-        path = converter.save_converters(mapping)
-        self._reload_generator()
-        return {"product_id": product_id, "saved": True, "deleted": override is None,
-                "path": path, "backup": backup_path}
+    def delete_converter_file(self, name: str) -> Dict[str, Any]:
+        """Delete one converter file (backing it up first). Reloads the generator
+        for a JSON file; a `.py` removal needs a restart to fully unload it."""
+        target = converter.file_path(name)  # validates the name
+        backup_path = backup.snapshot_file(self.backup_dir, str(target), prefix="converters")
+        converter.delete_file(name)
+        is_json = name.endswith(".json")
+        if is_json:
+            self._reload_generator()
+        return {"name": target.name, "deleted": True, "backup": backup_path,
+                "restart_required": not is_json}
 
 
 def register(ctx: Any) -> None:
@@ -431,6 +418,18 @@ def register(ctx: Any) -> None:
     plugin = DiscoveryPlugin(ctx)
     plugin.namespace = ctx.state_namespace(NAMESPACE)
     ctx.add_mqtt_subscription(f"{HA_PREFIX}/#", plugin.on_mqtt)
+
+    # Load user Python code converters (custom_converters/*.py): per-device
+    # derivation logic that reacts to decoded DPs and publishes derived DPs via
+    # the manager runtime. Self-guards to a no-op on a host with api_version < 2.
+    from . import code_converters
+
+    try:
+        loaded = code_converters.load_code_converters(ctx)
+        if loaded:
+            logger.info("rustuya-ha: loaded %d code converter(s)", loaded)
+    except Exception:  # never let a converter problem block plugin startup
+        logger.exception("rustuya-ha: code converter loading failed")
 
     # Imported lazily: the manager (and thus fastapi) is only present when this
     # plugin actually runs inside the host, so the module stays importable for
@@ -475,35 +474,39 @@ def register(ctx: Any) -> None:
         except RuntimeError as e:
             raise HTTPException(status_code=503, detail=str(e)) from e
 
-    # custom_converters editing (M5). preview/save take {product_id, override}
-    # where override is a JSON object (or null to delete the product's override).
+    # custom_converters editing: the converters live as a drop-in directory of
+    # files (*.json merged + *.py code converters); the editor is file-level.
     @router.get("/api/discovery/converters")
     async def discovery_converters() -> Dict[str, Any]:
-        return plugin.converters_info()
+        return plugin.converters_files()
 
-    @router.post("/api/discovery/converters/preview")
-    async def discovery_converters_preview(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    @router.get("/api/discovery/converters/file")
+    async def discovery_converter_read(name: str) -> Dict[str, Any]:
         try:
-            return plugin.preview_converter(body["product_id"], body.get("override"))
-        except (KeyError, ValueError) as e:
-            raise HTTPException(status_code=400, detail=str(e)) from e
+            return plugin.read_converter_file(name)
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e)) from e
 
-    @router.post("/api/discovery/converters/save")
-    async def discovery_converters_save(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    @router.post("/api/discovery/converters/file")
+    async def discovery_converter_write(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        if not body.get("name"):
+            raise HTTPException(status_code=400, detail="name required")
         try:
-            res = plugin.save_converter(body["product_id"], body.get("override"))
-        except (KeyError, ValueError) as e:
-            raise HTTPException(status_code=400, detail=str(e)) from e
-        await plugin.push()  # converter change may shift categories → refresh grid
-        return res
-
-    @router.post("/api/discovery/converters/save_all")
-    async def discovery_converters_save_all(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
-        try:
-            res = plugin.save_all_converters(body.get("converters"))
+            res = plugin.save_converter_file(body["name"], body.get("content", ""))
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
-        await plugin.push()  # converter changes may shift categories → refresh grid
+        await plugin.push()  # a JSON converter change may shift categories → refresh grid
+        return res
+
+    @router.post("/api/discovery/converters/file/delete")
+    async def discovery_converter_delete(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+        if not body.get("name"):
+            raise HTTPException(status_code=400, detail="name required")
+        try:
+            res = plugin.delete_converter_file(body["name"])
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        await plugin.push()  # a JSON converter removal may shift categories → refresh grid
         return res
 
     ctx.add_api_router(router)
