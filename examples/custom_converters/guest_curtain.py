@@ -24,7 +24,7 @@ edit + restart the manager to apply changes.
 """
 
 # ── configure for your device model ──────────────────────────────────────
-PRODUCT = "your_curtain_product_id"  # ← product_id (the JSON converter's key)
+PRODUCT = "h2wipnagcunsar5r"  # ← product_id (the JSON converter's key)
 CONTROL_DP = "1"   # open / close / stop
 SET_DP = "2"       # target position (raw %)
 POSITION_DP = "3"  # current position (raw %)
