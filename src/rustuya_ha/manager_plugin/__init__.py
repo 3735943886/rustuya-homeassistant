@@ -125,10 +125,14 @@ class DiscoveryPlugin:
         """Flatten verifier output into a compact, JSON-safe status grid.
 
         Shape consumed by the frontend:
-          {counts: {cat: n}, devices: [{id, name, category}], config_source,
-           retained_topics, errors: [...]}
+          {counts: {cat: n}, devices: [{id, name, product_id, category}],
+           config_source, retained_topics, errors: [...]}
         """
         counts = {cat: len(v) for cat, v in results.items() if isinstance(v, list)}
+        # product_id isn't carried in the verifier rows (it builds fresh dicts),
+        # so map it back from the in-memory cloud snapshot by device id. Surfaced
+        # per device in the grid — the authoring key for product-scoped converters.
+        pid_by_id = {did: raw.get("product_id") for did, raw in self.ctx.devices().items()}
         devices: List[Dict[str, Any]] = []
         for cat, lst in results.items():
             if cat == "errors" or not isinstance(lst, list):
@@ -142,6 +146,7 @@ class DiscoveryPlugin:
                 elif "id" in d:
                     row = {
                         "id": d["id"], "name": d.get("name", d["id"]),
+                        "product_id": pid_by_id.get(d["id"]) or "",
                         "category": cat,
                         "matched": len(d.get("matched", [])),
                         "mismatched": len(d.get("mismatched", [])),

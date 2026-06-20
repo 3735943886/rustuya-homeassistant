@@ -883,11 +883,24 @@ function deviceCard(ctx, d, view, rerender) {
   // identity is the topic already shown above. ──
   if (!isOrphan) {
     const bottom = el("div", "flex items-center gap-2 mt-0.5 min-w-0");
-    bottom.appendChild(
-      d.id && d.id !== d.name
-        ? el("span", "font-mono text-[11px] text-slate-400 dark:text-slate-500 truncate min-w-0", d.id)
-        : el("span", "min-w-0"),
-    );
+    // id + product_id (the authoring key for product-scoped converters). Both
+    // are mono+faint; the 🏷 prefix + tooltip disambiguates the product_id.
+    const idGroup = el("div", "flex items-baseline gap-1.5 min-w-0 flex-1");
+    if (d.id && d.id !== d.name) {
+      idGroup.appendChild(
+        el("span", "font-mono text-[11px] text-slate-400 dark:text-slate-500 truncate", d.id),
+      );
+    }
+    if (d.product_id) {
+      const pid = el(
+        "span",
+        "font-mono text-[10px] text-slate-400 dark:text-slate-500 shrink-0",
+        `🏷 ${d.product_id}`,
+      );
+      pid.title = t("card.productId");
+      idGroup.appendChild(pid);
+    }
+    bottom.appendChild(idGroup);
     const parts = [];
     if (d.mismatched) parts.push(["~" + d.mismatched, "text-amber-600 dark:text-amber-400"]);
     if (d.missing) parts.push(["-" + d.missing, "text-rose-600 dark:text-rose-400"]);
@@ -1158,15 +1171,6 @@ function renderConverters(ctx, view, rerender) {
     );
   }
 
-  // Authoring aid: the fleet's product_ids (✏ = a JSON converter already covers it).
-  if (c.products.length) {
-    const ref = el("div", "mt-2 text-[11px] text-slate-400 dark:text-slate-500 break-all");
-    ref.appendChild(el("span", "font-medium", `${t("conv.products")}: `));
-    ref.appendChild(
-      el("span", "font-mono", c.products.map((p) => p.product_id + (p.has_override ? "✏" : "")).join("  ")),
-    );
-    wrap.appendChild(ref);
-  }
   return wrap;
 }
 export async function mount(rootEl, ctx) {

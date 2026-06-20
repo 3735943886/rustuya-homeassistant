@@ -69,6 +69,7 @@
   "card.collapse": "접기",
   "card.expand": "펼치기",
   "card.orphan": "(고아)",
+  "card.productId": "제품 ID",
   "grid.empty": "표시할 기기가 아직 없습니다.",
   "grid.noMatch": "현재 필터에 맞는 기기가 없습니다.",
   "grid.waiting": "디스커버리 상태 대기 중…",
@@ -89,6 +90,5 @@
   "conv.dir": "디렉터리: {path}",
   "conv.selectPh": "파일 선택…",
   "conv.pickFile": "편집할 파일을 선택하거나 ＋로 추가하세요.",
-  "conv.noFiles": "컨버터 파일이 없습니다 — ＋로 추가하세요.",
-  "conv.products": "플릿 제품"
+  "conv.noFiles": "컨버터 파일이 없습니다 — ＋로 추가하세요."
 }

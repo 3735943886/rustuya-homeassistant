@@ -69,6 +69,7 @@
   "card.collapse": "Collapse",
   "card.expand": "Expand",
   "card.orphan": "(orphan)",
+  "card.productId": "product id",
   "grid.empty": "No devices to show yet.",
   "grid.noMatch": "No devices match the current filter.",
   "grid.waiting": "Waiting for discovery state…",
@@ -89,6 +90,5 @@
   "conv.dir": "dir: {path}",
   "conv.selectPh": "select a file…",
   "conv.pickFile": "Select a file to edit, or ＋ add one.",
-  "conv.noFiles": "No converter files yet — ＋ add one.",
-  "conv.products": "fleet products"
+  "conv.noFiles": "No converter files yet — ＋ add one."
 }

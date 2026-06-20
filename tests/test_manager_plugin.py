@@ -159,10 +159,12 @@ def test_summarize_shape():
     assert set(summary) >= {"counts", "devices", "config_source", "retained_topics", "errors"}
     assert summary["counts"]["pure_missing"] == len(DEVICES)
     assert len(summary["devices"]) == len(DEVICES)
-    # Every grid row carries id/name/category and is JSON-serializable.
+    # Every grid row carries id/name/category/product_id and is JSON-serializable.
     json.dumps(summary)
+    pid_by_id = {d["id"]: d.get("product_id", "") for d in DEVICES}
     for row in summary["devices"]:
-        assert {"id", "name", "category"} <= set(row)
+        assert {"id", "name", "category", "product_id"} <= set(row)
+        assert row["product_id"] == pid_by_id.get(row["id"], "")
 
 
 # ── drill-in detail in the grid (M4) ─────────────────────────────────────
