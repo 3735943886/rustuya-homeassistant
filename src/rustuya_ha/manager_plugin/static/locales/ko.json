@@ -88,6 +88,8 @@
   "conv.deleteFileMsg": "{name} 삭제할까요? (백업은 보관됩니다)",
   "conv.deletedFile": "{name} 삭제됨",
   "conv.dir": "디렉터리: {path}",
+  "conv.cancel": "취소",
+  "conv.unsaved": "저장 안 됨",
   "conv.selectPh": "파일 선택…",
   "conv.pickFile": "편집할 파일을 선택하거나 ＋로 추가하세요.",
   "conv.noFiles": "컨버터 파일이 없습니다 — ＋로 추가하세요."

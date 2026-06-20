@@ -994,6 +994,7 @@ async function openConvFile(ctx, view, name, rerender) {
     c.selected = f.name;
     c.kind = f.kind;
     c.content = f.content;
+    c.original = f.content; // baseline for dirty/revert
     c.creating = false;
     c.dirty = false;
     rerender();
@@ -1008,7 +1009,24 @@ function startNewConvFile(view, rerender) {
   c.selected = null;
   c.newName = "";
   c.content = "";
+  c.original = "";
   c.kind = "json";
+  c.dirty = false;
+  rerender();
+}
+
+// Revert unsaved edits: a new-file draft is discarded (back to the picker); an
+// existing file is restored to its on-disk baseline. Keeps the section open.
+function cancelConvEdit(view, rerender) {
+  const c = view.conv;
+  if (c.creating) {
+    c.creating = false;
+    c.newName = "";
+    c.content = "";
+    c.original = "";
+  } else {
+    c.content = c.original || "";
+  }
   c.dirty = false;
   rerender();
 }
@@ -1035,6 +1053,7 @@ async function saveConvFile(ctx, view, rerender) {
     c.creating = false;
     c.selected = res.name;
     c.kind = res.kind;
+    c.original = c.content; // saved content is the new baseline
     c.dirty = false;
     await loadConvFiles(ctx, view, rerender);
   } catch (e) {
@@ -1139,9 +1158,15 @@ function renderConverters(ctx, view, rerender) {
       });
       wrap.appendChild(nameInput);
     }
+    // Dirty = a new draft, or edited away from the on-disk baseline. Drives the
+    // Save/Cancel enablement and the unsaved marker.
+    const isDirty = c.creating || c.content !== (c.original || "");
     const ta = el(
       "textarea",
-      "w-full h-48 font-mono text-xs p-2 rounded border border-slate-300 dark:border-slate-600 " +
+      "w-full h-48 font-mono text-xs p-2 rounded border " +
+        (isDirty
+          ? "border-amber-400 dark:border-amber-500/70 "
+          : "border-slate-300 dark:border-slate-600 ") +
         "bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100",
     );
     ta.value = c.content;
@@ -1155,7 +1180,15 @@ function renderConverters(ctx, view, rerender) {
     wrap.appendChild(ta);
 
     const acts = el("div", "flex flex-wrap gap-2 mt-2 items-center");
-    acts.appendChild(btn(t("common.save"), BTN_PRIMARY, () => saveConvFile(ctx, view, rerender)));
+    const saveBtn = btn(t("common.save"), BTN_PRIMARY, () => saveConvFile(ctx, view, rerender));
+    saveBtn.disabled = !isDirty; // BTN_BASE styles disabled as muted
+    acts.appendChild(saveBtn);
+    if (isDirty) {
+      acts.appendChild(btn(t("conv.cancel"), BTN_GHOST, () => cancelConvEdit(view, rerender)));
+      acts.appendChild(
+        el("span", "text-[11px] font-medium text-amber-600 dark:text-amber-400", `● ${t("conv.unsaved")}`),
+      );
+    }
     if (!c.creating && c.selected) {
       acts.appendChild(btn(t("conv.deleteFile"), BTN_DANGER, () => deleteConvFile(ctx, view, rerender)));
     }
@@ -1207,7 +1240,7 @@ export async function mount(rootEl, ctx) {
     search: "", filters: loadFilters(), sort: loadSort(), expanded: new Set(),
     conv: {
       open: false, loaded: false, busy: false, dir: "", files: [], products: [],
-      selected: null, content: "", kind: "json", creating: false, newName: "", dirty: false,
+      selected: null, content: "", original: "", kind: "json", creating: false, newName: "", dirty: false,
     },
   };
   let lastData = null;
