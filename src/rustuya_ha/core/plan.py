@@ -12,8 +12,11 @@ The retained map shape is ``{topic: {"payload": <parsed dict>, ...}}`` — exact
 what both callers already hold (CLI ``mqtt_data``; plugin ``self.retained``).
 """
 import json
+import logging
 from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 
 def device_id_of(payload: Dict[str, Any]) -> Optional[str]:
@@ -56,8 +59,9 @@ def publish_plan(
         try:
             payloads, _ = generator.generate(d)
             new_topics[d["id"]] = payloads
-        except Exception as e:  # generator failure is reported, not fatal
-            errors.append({"id": d["id"], "error": str(e)})
+        except Exception:  # generator failure is reported, not fatal
+            logger.exception("Failed to generate discovery payloads for device id=%s", d["id"])
+            errors.append({"id": d["id"], "error": "Failed to generate discovery payloads"})
 
     existing = owned_topics(retained, new_topics.keys())
     msgs: List[dict] = []
