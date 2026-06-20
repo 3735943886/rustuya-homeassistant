@@ -1055,14 +1055,6 @@ async function deleteConvFile(ctx, view, rerender) {
   }
 }
 
-function convFileChip(f, active, onClick) {
-  const badge = f.kind === "py" ? "🐍" : "{}";
-  const cls = active
-    ? "bg-slate-700 text-white border-slate-700 dark:bg-slate-200 dark:text-slate-900 dark:border-slate-200"
-    : "bg-white text-slate-700 border-slate-300 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-600";
-  return btn(`${badge} ${f.name}`, `px-2 py-1 rounded border text-xs font-mono ${cls}`, onClick);
-}
-
 function renderConverters(ctx, view, rerender) {
   const c = view.conv;
   const wrap = el("div", "mt-4 border-t border-slate-200 dark:border-slate-700 pt-3");
@@ -1079,22 +1071,45 @@ function renderConverters(ctx, view, rerender) {
     return wrap;
   }
 
-  // File chips + "＋ new file".
-  const list = el("div", "flex flex-wrap gap-1 mb-2 items-center");
-  for (const f of c.files) {
-    list.appendChild(
-      convFileChip(f, !c.creating && f.name === c.selected, () => openConvFile(ctx, view, f.name, rerender)),
-    );
+  // One dropdown (grouped by kind) + "＋ new file". A native <select> scales
+  // past a wrapping chip row when there are many files, and the <optgroup>s keep
+  // JSON / Python visually separated within the single control.
+  const bar = el("div", "flex flex-wrap gap-2 mb-2 items-center");
+  const sel = el(
+    "select",
+    "text-xs font-mono px-2 py-1 rounded border border-slate-300 dark:border-slate-600 " +
+      "bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 max-w-full disabled:opacity-50",
+  );
+  const ph = el("option", null, t("conv.selectPh"));
+  ph.value = "";
+  sel.appendChild(ph);
+  for (const [kind, glabel] of [["json", "JSON"], ["py", "Python"]]) {
+    const files = c.files.filter((f) => f.kind === kind);
+    if (!files.length) continue;
+    const og = el("optgroup");
+    og.label = glabel;
+    for (const f of files) {
+      const o = el("option", null, f.name);
+      o.value = f.name;
+      og.appendChild(o);
+    }
+    sel.appendChild(og);
   }
+  sel.value = !c.creating && c.selected ? c.selected : "";
+  sel.disabled = c.files.length === 0;
+  sel.addEventListener("change", () => {
+    if (sel.value) openConvFile(ctx, view, sel.value, rerender);
+  });
+  bar.appendChild(sel);
   const addCls = c.creating
     ? "bg-slate-700 text-white border-slate-700 dark:bg-slate-200 dark:text-slate-900"
     : "border-dashed border-slate-400 text-slate-500 dark:text-slate-400";
-  list.appendChild(
+  bar.appendChild(
     btn(`＋ ${t("conv.newFile")}`, `px-2 py-1 rounded border text-xs ${addCls}`, () =>
       startNewConvFile(view, rerender),
     ),
   );
-  wrap.appendChild(list);
+  wrap.appendChild(bar);
 
   if (c.creating || c.selected) {
     if (c.creating) {

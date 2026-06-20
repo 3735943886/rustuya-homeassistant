@@ -87,6 +87,7 @@
   "conv.deleteFileMsg": "Delete {name}? (a backup is kept)",
   "conv.deletedFile": "deleted {name}",
   "conv.dir": "dir: {path}",
+  "conv.selectPh": "select a file…",
   "conv.pickFile": "Select a file to edit, or ＋ add one.",
   "conv.noFiles": "No converter files yet — ＋ add one.",
   "conv.products": "fleet products"
