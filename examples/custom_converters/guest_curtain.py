@@ -33,6 +33,7 @@ def setup(api):
     inverted = bool(cover.get("invert_position"))
 
     latest = {}  # last value seen for each DP, held across events
+    emitted = {"state": None}  # last derived state actually published
 
     @api.on_device(DEVICE)
     async def _(device_id, dps, origin):
@@ -77,5 +78,10 @@ def setup(api):
         if (pos <= 0 and state == "closing") or (pos >= 100 and state == "opening"):
             state = "stopped"
 
-        if state is not None:
+        # The bridge republishes each DP on several event streams (active /
+        # passive / state), so this handler fires more than once for one real
+        # change. Publish only when the derived state actually changes — the
+        # output is idempotent regardless of how many streams echo the input.
+        if state is not None and state != emitted["state"]:
+            emitted["state"] = state
             await api.derive(device_id, OUT_DP, state)
