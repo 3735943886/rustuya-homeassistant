@@ -10,7 +10,7 @@ Loaded once at `register()` time, per-file isolated (a broken file is logged and
 skipped, never taking down the manager). Editing a file takes effect on the next
 manager restart (re-exec), like any in-process Python.
 
-Example `custom_converters/curtain_cover.py`::
+Example `custom_converters/00_curtain.py`::
 
     def setup(api):
         PRODUCT = "h2wipnagcunsar5r"

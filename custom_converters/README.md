@@ -33,7 +33,7 @@ the product_id / DP numbers at the top, and restart.
 
 ## Files
 
-- [`curtain_cover.py`](curtain_cover.py) — derive a Home Assistant cover state
+- [`00_curtain.py`](00_curtain.py) — derive a Home Assistant cover state
   (opening/closing/open/closed/stopped) from a Tuya curtain motor's raw DPs, for
   a whole device model (by product_id), with per-device state seeded from the
   manager snapshot.
