@@ -37,7 +37,6 @@ the product_id / DP numbers at the top, and restart.
   (opening/closing/open/closed/stopped) from a Tuya curtain motor's raw DPs, for
   a whole device model (by product_id), with per-device state seeded from the
   manager snapshot.
-- `00_default.json` — base JSON overrides (a window opener + two curtain models),
-  **non-inverted**. The `00_` prefix sorts it first so personal tweaks in a
-  higher-sorted file (e.g. `99_custom.json`, gitignored) merge on top — that's
-  where inversion (`invert_position` / `invert_set_position`) belongs.
+- [`00_default.json`](00_default.json) — base JSON overrides (a window opener + two curtain models).
+  Files deep-merge by sorted filename, so a higher-sorted gitignored `99_*.json`
+  can layer local tweaks on top of the base.
