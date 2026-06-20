@@ -30,7 +30,10 @@
     "model": "智能窗帘电机",
     "discovery_overrides": {
       "cover": {
-        "state_dp": null,
+        "state_dp": "99",
+        "state_opening": "opening",
+        "state_closing": "closing",
+        "state_stopped": "stopped",
         "payload_open": "open",
         "payload_close": "close",
         "payload_stop": "stop"
