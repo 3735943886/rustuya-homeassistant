@@ -280,9 +280,19 @@ class DiscoveryPlugin:
     async def restore(self, file: Optional[str] = None, dry_run: bool = False) -> Dict[str, Any]:
         """Revert retained discovery to a saved snapshot (full-scope undo):
         re-publish the snapshot's topics and clear any topics added since."""
-        path = file or backup.latest(self.backup_dir)
-        if not path:
-            return {"action": "restore", "error": "no backup found", "executed": False}
+        if file:
+            # A restore target is user-supplied — confine it to the backup dir
+            # (no arbitrary-path read) and require it to exist.
+            try:
+                path = backup.safe_path(self.backup_dir, file)
+            except ValueError:
+                return {"action": "restore", "error": "invalid backup name", "executed": False}
+            if not os.path.isfile(path):
+                return {"action": "restore", "error": "no such backup", "executed": False}
+        else:
+            path = backup.latest(self.backup_dir)
+            if not path:
+                return {"action": "restore", "error": "no backup found", "executed": False}
         snapshot = backup.load(path)
         set_msgs, clear_msgs = restore_plan(snapshot, list(self.retained.keys()))
         msgs = clear_msgs + set_msgs

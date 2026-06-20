@@ -73,7 +73,8 @@ def test_publish_plan_reports_generator_errors():
             raise ValueError("boom")
     msgs, per_device, errors = plan.publish_plan([{"id": "x", "name": "X"}], BoomGen(), {})
     assert msgs == [] and per_device == []
-    assert errors == [{"id": "x", "error": "boom"}]
+    # The raw exception text is logged, not exposed — a generic message is returned.
+    assert errors == [{"id": "x", "error": "Failed to generate discovery payloads"}]
 
 
 def test_clear_plan_clears_all_owned():

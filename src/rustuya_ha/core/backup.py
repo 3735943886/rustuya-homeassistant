@@ -14,6 +14,7 @@ Backup files hold device names/ids/models (same sensitivity as tuyadevices.json)
 so the backup dir should be gitignored.
 """
 import json
+import os
 import time
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -22,6 +23,20 @@ from .restore import restore_plan  # noqa: F401  (re-export: backup.restore_plan
 
 DEFAULT_DIR = ".rustuya-ha-backups"
 KEEP = 20  # rotate: keep the newest N auto-backups
+
+
+def safe_path(directory: str, name: str) -> str:
+    """Resolve a backup `name` strictly inside `directory`, blocking traversal.
+
+    A restore target is user-supplied, so confine it: strip any directory parts
+    (`basename`) then verify, via realpath + commonpath, that the result stays in
+    `directory`. Raises ValueError if it would escape — the barrier that keeps an
+    arbitrary-path read from reaching `load()`."""
+    base = os.path.realpath(directory)
+    target = os.path.realpath(os.path.join(base, os.path.basename(name)))
+    if os.path.commonpath((base, target)) != base:
+        raise ValueError(f"backup path escapes its directory: {name!r}")
+    return target
 
 
 def save(backup_dir: str, mqtt_data: Dict[str, dict], prefix: str = "auto") -> str:
