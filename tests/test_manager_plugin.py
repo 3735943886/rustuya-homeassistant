@@ -513,14 +513,20 @@ class _RuntimeCtx:
     exercise the ConverterApi facade (on_product/on_device/derive). `emit`
     mirrors the manager's _dispatch_dp_watchers fan-out."""
 
-    def __init__(self, devices, api_version=2):
+    def __init__(self, devices, api_version=2, dps=None):
         self.api_version = api_version
         self._devices = {d["id"]: d for d in devices}
+        self._dps = dps or {}   # {device_id: {dp: value}} live snapshot
         self.watchers = []   # (device_id|None, dp|None, handler)
         self.derived = []    # (device_id, dp, value)
 
     def devices(self):
         return dict(self._devices)
+
+    def current_dps(self, device_id=None):
+        if device_id is not None:
+            return dict(self._dps.get(device_id, {}))
+        return {d: dict(v) for d, v in self._dps.items()}
 
     def watch_dps(self, handler):
         self.watchers.append((None, None, handler))
@@ -599,3 +605,19 @@ def test_load_code_converters_runs_setup_and_gates_on_api_version(monkeypatch, t
     assert code_converters.load_code_converters(ctx) == 1
     asyncio.run(ctx.emit("dev-a", {"1": "v"}))
     assert ctx.derived == [("dev-a", "99", "v")]
+
+
+def test_current_dps_facade_reads_snapshot_and_tolerates_old_host():
+    from rustuya_ha.manager_plugin.code_converters import ConverterApi
+
+    ctx = _RuntimeCtx([{"id": "dev-a", "product_id": "P"}], dps={"dev-a": {"3": 100}})
+    api = ConverterApi(ctx, {})
+    assert api.current_dps("dev-a") == {"3": 100}
+    assert api.current_dps("nope") == {}
+    assert api.current_dps() == {"dev-a": {"3": 100}}
+
+    # A host without current_dps (older runtime) degrades to {}, not an error.
+    class _Old:
+        api_version = 2
+
+    assert ConverterApi(_Old(), {}).current_dps("dev-a") == {}

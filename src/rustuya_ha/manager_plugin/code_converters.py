@@ -10,17 +10,17 @@ Loaded once at `register()` time, per-file isolated (a broken file is logged and
 skipped, never taking down the manager). Editing a file takes effect on the next
 manager restart (re-exec), like any in-process Python.
 
-Example `custom_converters/guest_curtain.py`::
+Example `custom_converters/curtain_cover.py`::
 
     def setup(api):
-        DEV = "eba796ada03c1aeb00cfah"
-        inv = api.converter(api.product_id(DEV))["discovery_overrides"]["cover"]
-        latest = {}
+        PRODUCT = "h2wipnagcunsar5r"
+        by_device = {}
 
-        @api.on_device(DEV)
+        @api.on_product(PRODUCT)               # every device of this model
         async def _(device_id, dps, origin):
-            latest.update(dps)
-            state = ...                       # any per-device logic
+            st = by_device.setdefault(device_id, dict(api.current_dps(device_id)))
+            st.update(dps)
+            state = ...                        # any per-device logic
             if state is not None:
                 await api.derive(device_id, "99", state)   # topic = manager's job
 """
@@ -135,6 +135,20 @@ class ConverterApi:
     def devices(self) -> dict:
         """The cloud devices snapshot `{id: raw_data}`."""
         return self._ctx.devices()
+
+    def current_dps(self, device_id: Optional[str] = None) -> dict:
+        """Snapshot of the manager's current decoded DP values (manager rc58+).
+
+        `device_id=None` → `{device_id: {dp: value}}` for every device;
+        a `device_id` → that device's `{dp: value}` (`{}` if unknown). Call it at
+        setup to seed a combinator from the values already on hand — e.g. the
+        position a curtain reported before this converter loaded — instead of
+        waiting for each source DP's next change. Returns `{}` on hosts too old to
+        expose it, so a converter degrades gracefully."""
+        fn = getattr(self._ctx, "current_dps", None)
+        if fn is None:
+            return {}
+        return fn(device_id)
 
     def product_id(self, device_id: str):
         """The `product_id` of a device (for looking up its converter)."""
