@@ -94,6 +94,48 @@ def _retained_for(devices, bridge_cfg=None):
     return retained
 
 
+# ── converters dir pinning (ctx.data_dir adoption) ─────────────────────────
+def test_pin_converters_dir_uses_data_dir(tmp_path, monkeypatch):
+    from rustuya_ha.core import converter
+    from rustuya_ha.manager_plugin import _pin_converters_dir
+
+    monkeypatch.delenv(converter.ENV_VAR, raising=False)
+
+    class CtxWithDataDir(FakeCtx):
+        def data_dir(self, name):
+            d = tmp_path / name
+            d.mkdir(parents=True, exist_ok=True)
+            return d
+
+    pinned = _pin_converters_dir(CtxWithDataDir())
+    assert pinned == str(tmp_path / "custom_converters")
+    assert os.environ[converter.ENV_VAR] == str(tmp_path / "custom_converters")
+
+
+def test_pin_converters_dir_respects_explicit_env(tmp_path, monkeypatch):
+    from rustuya_ha.core import converter
+    from rustuya_ha.manager_plugin import _pin_converters_dir
+
+    monkeypatch.setenv(converter.ENV_VAR, "/operator/choice")
+
+    class CtxWithDataDir(FakeCtx):
+        def data_dir(self, name):  # would resolve elsewhere, but env wins
+            return tmp_path / name
+
+    assert _pin_converters_dir(CtxWithDataDir()) is None
+    assert os.environ[converter.ENV_VAR] == "/operator/choice"
+
+
+def test_pin_converters_dir_noop_on_old_host(monkeypatch):
+    from rustuya_ha.core import converter
+    from rustuya_ha.manager_plugin import _pin_converters_dir
+
+    monkeypatch.delenv(converter.ENV_VAR, raising=False)
+    # FakeCtx has no data_dir attribute → feature-detect leaves env unset.
+    assert _pin_converters_dir(FakeCtx()) is None
+    assert converter.ENV_VAR not in os.environ
+
+
 # ── update_retained ──────────────────────────────────────────────────────
 def test_update_retained_tracks_only_config_topics():
     p = DiscoveryPlugin(FakeCtx())

@@ -436,6 +436,28 @@ class DiscoveryPlugin:
                 "restart_required": not is_json}
 
 
+def _pin_converters_dir(ctx: Any) -> Optional[str]:
+    """Point the converters directory at the host's CWD-independent data dir
+    (``ctx.data_dir``) when one is offered, so the dir the plugin reads, the
+    editor writes, and the pack syncs into is the same regardless of the
+    manager's working directory — and survives plugin reinstalls.
+
+    Feature-detected and deferential: an older host without ``data_dir``, or an
+    operator-set ``RUSTUYA_CONVERTERS``, is left untouched. Returns the directory
+    it pinned (for logging/tests), or ``None`` when it left resolution alone."""
+    data_dir = getattr(ctx, "data_dir", None)
+    if not callable(data_dir) or os.environ.get(converter.ENV_VAR):
+        return None
+    try:
+        path = str(data_dir("custom_converters"))
+    except Exception:
+        logger.debug("rustuya-ha: ctx.data_dir unusable; using default converters dir", exc_info=True)
+        return None
+    os.environ[converter.ENV_VAR] = path
+    logger.info("rustuya-ha: converters dir → %s", path)
+    return path
+
+
 def register(ctx: Any) -> None:
     """Entry-point hook the manager's plugin host calls once at startup.
 
@@ -449,6 +471,9 @@ def register(ctx: Any) -> None:
             getattr(ctx, "api_version", None),
         )
         return
+
+    # Must run before the generator is built (it reads converters).
+    _pin_converters_dir(ctx)
 
     plugin = DiscoveryPlugin(ctx)
     plugin.namespace = ctx.state_namespace(NAMESPACE)
