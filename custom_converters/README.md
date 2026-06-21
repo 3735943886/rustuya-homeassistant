@@ -31,12 +31,23 @@ the product_id / DP numbers at the top, and restart.
 - `api.converter(product_id)` / `api.product_id(device_id)` / `api.devices()` /
   `api.bridge_config()` — read your converters + the fleet
 
+## Default-converter pack
+
+The `00_*` files here are a curated **pack**, indexed by [`manifest.json`](manifest.json)
+(built by `scripts/build_converter_manifest.py`, each file pinned by SHA-256). The
+manager plugin's "update defaults" action fetches that manifest from `master` and
+mirrors the pack into your live converters directory — so a converter fix is one
+push away, with no plugin release (the same model as the plugin catalog). It only
+ever writes/removes files it manages (tracked in `.rustuya_pack.json`); your own
+files — `99_*` and anything hand-authored — are never touched. `manifest.json`
+itself is metadata, not a converter, and is skipped by the loader/editor.
+
 ## Files
 
 - [`00_curtain.py`](00_curtain.py) — derive a Home Assistant cover state
-  (opening/closing/open/closed/stopped) from a Tuya curtain motor's raw DPs, for
-  a whole device model (by product_id), with per-device state seeded from the
-  manager snapshot.
+  (opening/closing/open/closed) from a Tuya curtain motor's raw DPs, for a whole
+  device model (by product_id), with per-device state seeded from the manager
+  snapshot.
 - [`00_default.json`](00_default.json) — base JSON overrides (a window opener + two curtain models).
   Files deep-merge by sorted filename, so a higher-sorted gitignored `99_*.json`
   can layer local tweaks on top of the base.

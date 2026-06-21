@@ -92,5 +92,11 @@
   "conv.unsaved": "unsaved",
   "conv.selectPh": "select a file…",
   "conv.pickFile": "Select a file to edit, or ＋ add one.",
-  "conv.noFiles": "No converter files yet — ＋ add one."
+  "conv.noFiles": "No converter files yet — ＋ add one.",
+  "conv.packGet": "get defaults",
+  "conv.packUpdate": "update defaults",
+  "conv.packHint": "fetch the latest default converters from GitHub (your own files are left untouched)",
+  "conv.packDone": "defaults synced — +{added} ~{updated} -{removed}",
+  "conv.packUpToDate": "default converters already up to date",
+  "conv.packFailed": "{count} file(s) failed to update"
 }

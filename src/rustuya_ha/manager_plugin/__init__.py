@@ -27,7 +27,7 @@ import logging
 import os
 from typing import Any, Dict, List, Optional
 
-from ..core import backup, converter, plan
+from ..core import backup, converter, pack, plan
 from ..core.bridge import BridgeConfig
 from ..core.detail import device_detail, has_detail
 from ..core.generator import initialize_generator
@@ -338,10 +338,17 @@ class DiscoveryPlugin:
             )
             e["device_ids"].append(did)
             e["device_names"].append(raw.get("name", did))
+        pack_dir = converter.savable_dir(None)
         return {
-            "dir": str(converter.savable_dir(None)),
+            "dir": str(pack_dir),
             "files": converter.list_files(),
             "products": sorted(products.values(), key=lambda x: x["product_id"]),
+            # Default-converter pack state, so the UI can offer "get the defaults"
+            # on a fresh install vs "update" once they're present.
+            "pack": {
+                "synced": pack.has_synced(pack_dir),
+                "managed": len(pack.read_ledger(pack_dir)),
+            },
         }
 
     def read_converter_file(self, name: str) -> Dict[str, Any]:
@@ -403,6 +410,19 @@ class DiscoveryPlugin:
         return {"name": target.name, "kind": "json" if is_json else "py",
                 "path": path, "backup": backup_path, "restart_required": not is_json}
 
+    async def update_default_converters(self) -> Dict[str, Any]:
+        """Fetch the curated default-converter pack from GitHub and mirror it into
+        the converters directory — adding/updating/removing only the files the
+        pack manages, never the user's own (`99_*`, hand-authored). Reloads the
+        generator for the JSON changes; a `.py` add/update/remove needs a restart
+        to take effect. Network/verify failures raise `pack.PackError`."""
+        dest = converter.savable_dir(None)
+        summary = await asyncio.to_thread(pack.sync, str(dest))
+        self._reload_generator()  # JSON converters hot-reload
+        touched = summary["added"] + summary["updated"] + summary["removed"]
+        summary["restart_required"] = any(n.endswith(".py") for n in touched)
+        return summary
+
     def delete_converter_file(self, name: str) -> Dict[str, Any]:
         """Delete one converter file (backing it up first). Reloads the generator
         for a JSON file; a `.py` removal needs a restart to fully unload it."""
@@ -445,6 +465,26 @@ def register(ctx: Any) -> None:
             logger.info("rustuya-ha: loaded %d code converter(s)", loaded)
     except Exception:  # never let a converter problem block plugin startup
         logger.exception("rustuya-ha: code converter loading failed")
+
+    # On a fresh install (the pack has never been synced here), seed the curated
+    # default converters from GitHub once — as a one-shot background service so it
+    # never blocks startup and a network hiccup is a logged no-op, not a failure.
+    # Needs the service runtime (api_version >= 2); updates after this are the
+    # user's explicit "update defaults" action. A seeded `.py` activates on the
+    # next restart (code converters load at register time, above).
+    if getattr(ctx, "api_version", 0) >= 2 and not pack.has_synced(converter.savable_dir(None)):
+        async def _seed_default_converters() -> None:
+            try:
+                summary = await plugin.update_default_converters()
+                await plugin.push()
+                logger.info("rustuya-ha: seeded default converters (%s)", summary)
+            except pack.PackError as e:
+                logger.warning("rustuya-ha: default converter seed skipped: %s", e)
+
+        try:
+            ctx.add_service(lambda: _seed_default_converters())
+        except Exception:  # add_service missing/again → just skip the auto-seed
+            logger.debug("rustuya-ha: auto-seed service not registered", exc_info=True)
 
     # Imported lazily: the manager (and thus fastapi) is only present when this
     # plugin actually runs inside the host, so the module stays importable for
@@ -522,6 +562,18 @@ def register(ctx: Any) -> None:
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
         await plugin.push()  # a JSON converter removal may shift categories → refresh grid
+        return res
+
+    # Pull the curated default-converter pack from GitHub (decoupled from this
+    # plugin's release — a converter fix on master is enough). Mirrors only the
+    # pack's own files; the user's converters are untouched.
+    @router.post("/api/discovery/converters/update")
+    async def discovery_converters_update() -> Dict[str, Any]:
+        try:
+            res = await plugin.update_default_converters()
+        except pack.PackError as e:
+            raise HTTPException(status_code=502, detail=str(e)) from e
+        await plugin.push()  # new/changed converters may shift categories → refresh grid
         return res
 
     ctx.add_api_router(router)

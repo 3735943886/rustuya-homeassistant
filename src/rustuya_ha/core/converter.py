@@ -89,6 +89,10 @@ FILENAME = "custom_converters.json"
 # The only file types the editor/loader will surface or touch.
 _ALLOWED_SUFFIXES = (".json", ".py")
 
+# The default-converter pack index (see core.pack) lives in the converters dir
+# but is metadata, not a converter — the loader and editor skip it by name.
+PACK_MANIFEST_NAME = "manifest.json"
+
 
 def resolve_path(path: Optional[str] = None) -> Path:
     """Resolve the converters source: explicit arg > $RUSTUYA_CONVERTERS >
@@ -128,7 +132,10 @@ def _json_files(target: Path) -> List[Path]:
     """The `*.json` converter files under `target` (a dir → sorted glob; a single
     `.json` → itself), in deterministic order so merges are reproducible."""
     if target.is_dir():
-        return sorted(p for p in target.glob("*.json") if not p.name.startswith("."))
+        return sorted(
+            p for p in target.glob("*.json")
+            if not p.name.startswith(".") and p.name != PACK_MANIFEST_NAME
+        )
     if target.is_file() and target.suffix == ".json":
         return [target]
     return []
@@ -191,7 +198,8 @@ def list_files(path: Optional[str] = None) -> List[Dict[str, Any]]:
         files = sorted(
             p
             for p in target.iterdir()
-            if p.is_file() and p.suffix in _ALLOWED_SUFFIXES and not p.name.startswith(".")
+            if p.is_file() and p.suffix in _ALLOWED_SUFFIXES
+            and not p.name.startswith(".") and p.name != PACK_MANIFEST_NAME
         )
     elif target.is_file():
         files = [target]

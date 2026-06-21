@@ -12,6 +12,8 @@ dropin/
 # the repo. The 99_ prefix sorts last so it deep-merges on top of the curated
 # base (00_default.json). Re-ignored here so it's never accidentally committed.
 custom_converters/99_*.json
+# Runtime ledger of the default-converter pack (core.pack) — local state, not source.
+custom_converters/.rustuya_pack.json
 # Test fixtures are synthetic (no private device data) — always tracked, so new
 # ones aren't silently dropped by the *.json rule above.
 !tests/fixtures/*.json

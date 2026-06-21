@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "base_url": "https://raw.githubusercontent.com/3735943886/rustuya-homeassistant/master/custom_converters/",
+  "files": [
+    {
+      "name": "00_curtain.py",
+      "sha256": "d84e0f29b39c00a933ed9bd4eb70b5023e0963e0e4f1bbe41af96295b94732d0"
+    },
+    {
+      "name": "00_default.json",
+      "sha256": "8ca5f430f45058986064b3d15fbf5e38e0d9637283091f969e99a71c4bbcc64b"
+    }
+  ]
+}

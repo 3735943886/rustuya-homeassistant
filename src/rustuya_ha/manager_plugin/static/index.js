@@ -973,6 +973,7 @@ async function loadConvFiles(ctx, view, rerender) {
     c.dir = info.dir || "";
     c.files = info.files || [];
     c.products = info.products || [];
+    c.pack = info.pack || { synced: false, managed: 0 };
     c.loaded = true;
     // Drop a selection that no longer exists on disk (unless mid-create).
     if (c.selected && !c.creating && !c.files.some((f) => f.name === c.selected)) {
@@ -983,6 +984,40 @@ async function loadConvFiles(ctx, view, rerender) {
     ctx.toast && ctx.toast(`${t("conv.label")}: ${e.message}`, "error");
   } finally {
     c.busy = false;
+    rerender();
+  }
+}
+
+async function updateDefaultConverters(ctx, view, rerender) {
+  const c = view.conv;
+  if (c.packBusy) return;
+  c.packBusy = true;
+  rerender();
+  try {
+    const res = await ctx.api("/api/discovery/converters/update", { method: "POST" });
+    if (res.changed) {
+      ctx.toast &&
+        ctx.toast(
+          t("conv.packDone", {
+            added: res.added.length,
+            updated: res.updated.length,
+            removed: res.removed.length,
+          }),
+          "ok",
+        );
+    } else {
+      ctx.toast && ctx.toast(t("conv.packUpToDate"), "ok");
+    }
+    if ((res.failed || []).length) {
+      ctx.toast && ctx.toast(t("conv.packFailed", { count: res.failed.length }), "error");
+    }
+    if (res.restart_required) ctx.toast && ctx.toast(t("conv.restartNote"), "ok");
+    c.loaded = false; // re-fetch the file list + pack state
+    await loadConvFiles(ctx, view, rerender);
+  } catch (e) {
+    ctx.toast && ctx.toast(`${t("conv.label")}: ${e.message}`, "error");
+  } finally {
+    c.packBusy = false;
     rerender();
   }
 }
@@ -1141,6 +1176,22 @@ function renderConverters(ctx, view, rerender) {
       startNewConvFile(view, rerender),
     ),
   );
+  // Pull the curated default-converter pack from GitHub (independent of the
+  // plugin release). Labelled "get" on a fresh install, "update" once present.
+  const packLabel = c.packBusy
+    ? t("common.loading")
+    : c.pack && c.pack.synced
+      ? t("conv.packUpdate")
+      : t("conv.packGet");
+  const packBtn = btn(
+    `⟳ ${packLabel}`,
+    "px-2 py-1 rounded border text-xs border-slate-300 dark:border-slate-600 " +
+      "text-slate-600 dark:text-slate-300 ml-auto disabled:opacity-50",
+    () => updateDefaultConverters(ctx, view, rerender),
+  );
+  packBtn.disabled = !!c.packBusy;
+  packBtn.title = t("conv.packHint");
+  bar.appendChild(packBtn);
   wrap.appendChild(bar);
 
   if (c.creating || c.selected) {
