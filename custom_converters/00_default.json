@@ -32,9 +32,6 @@
       "cover": {
         "state_dp": "99",
         "state_stream": "derived",
-        "state_opening": "opening",
-        "state_closing": "closing",
-        "state_stopped": "stopped",
         "payload_open": "open",
         "payload_close": "close",
         "payload_stop": "stop"
