@@ -28,7 +28,7 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--devices", metavar="PATH",
                         help="device list JSON (or $RUSTUYA_DEVICES; default tuyadevices.json)")
     common.add_argument("--converters", metavar="PATH",
-                        help="custom converter JSON (or $RUSTUYA_CONVERTERS; default ./custom_converters.json)")
+                        help="custom converters dir or JSON file (or $RUSTUYA_CONVERTERS; default ./custom_converters/)")
     common.add_argument("--bridge-config", metavar="PATH",
                         help="rustuya-bridge config JSON for topic/payload templates "
                              "(or $RUSTUYA_BRIDGE_CONFIG; else read from retained MQTT, else legacy)")

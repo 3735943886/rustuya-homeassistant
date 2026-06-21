@@ -10,7 +10,7 @@ publishes the corresponding retained `homeassistant/.../config` topics.
 ## Install
 
 ```bash
-pip install rustuya-homeassistant   # from PyPI (pre-release only for now)
+pip install --pre rustuya-homeassistant   # from PyPI (pre-release only for now)
 pip install -e .                           # or from a checkout
 rustuya-ha --help
 ```
@@ -58,7 +58,7 @@ narrows by verifier category (see `rustuya-ha -h`).
 |---|---|---|---|
 | MQTT broker | `--broker HOST[:PORT]` | `RUSTUYA_MQTT` | `localhost:1883` |
 | Device list | `--devices PATH` | `RUSTUYA_DEVICES` | `tuyadevices.json` |
-| Custom converters | `--converters PATH` | `RUSTUYA_CONVERTERS` | `./custom_converters.json` |
+| Custom converters | `--converters PATH` | `RUSTUYA_CONVERTERS` | `./custom_converters/` (a single `.json` is also accepted) |
 
 ## As a rustuya-manager plugin (Web UI / Docker)
 
@@ -120,7 +120,7 @@ rustuya_ha/
   core/    pure generation logic (no MQTT, no argparse) — usable as a library
     generator.py   DiscoveryGenerator: device -> {topic: payload}
     mapping.py     DP/category -> HA entity tables
-    converter.py   user DP overrides (custom_converters.json)
+    converter.py   user DP overrides (custom_converters/ drop-in dir)
     scheme.py      TopicScheme / PayloadCodec seams (topic layout + payload shape)
   cli/     thin argparse wrapper (manager = MQTT I/O, verifier, render)
 ```
