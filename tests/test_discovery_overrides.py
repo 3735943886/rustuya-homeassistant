@@ -114,6 +114,35 @@ def test_cover_override_merges_and_resolves_dp(tmp_path):
     assert "invert_position" not in cover
 
 
+def test_state_stream_derived_points_at_derived_type(tmp_path):
+    """`state_stream: "derived"` reads a code converter's {type}=derived DP — the
+    state_topic carries the `derived` segment, vs `state` for a normal read."""
+    from rustuya_ha.core.bridge import BridgeConfig
+    from rustuya_ha.core.scheme import scheme_for
+
+    # A bridge scheme with {type} in the event topic so the stream picks the segment.
+    cfg = {
+        "mqtt_root_topic": "rustuya",
+        "mqtt_command_topic": "{root}/command/{action}/{id}/{dp}",
+        "mqtt_event_topic": "{root}/event/{type}/{id}/{dp}",
+        "mqtt_payload_template": "{value}",
+        "mqtt_retain": True,
+    }
+
+    def cover_for(stream):
+        block = {"state_dp": "99"}
+        if stream:
+            block["state_stream"] = stream
+        gen = _generator({PRODUCT_ID: {"discovery_overrides": {"cover": block}}},
+                         tmp_path, name=f"{stream or 'none'}.json")
+        gen.scheme, gen.codec = scheme_for(BridgeConfig.from_dict(cfg))
+        return gen.generate(CURTAIN_DEVICE)[0][COVER_TOPIC]
+
+    assert cover_for("derived")["state_topic"] == "rustuya/event/derived/dev_curtain_demo/99"
+    # contrast: a plain state_dp lands on the retained `state` snapshot type
+    assert cover_for(None)["state_topic"] == "rustuya/event/state/dev_curtain_demo/99"
+
+
 def test_invert_position_and_set_position_are_independent(tmp_path):
     """Read- and write-direction inversion are separate flags."""
     # read inverted, write NOT inverted -> no set_position_template

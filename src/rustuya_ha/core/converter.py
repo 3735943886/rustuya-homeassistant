@@ -47,9 +47,10 @@ component on the device. Keys are either structured or verbatim:
   roles (state/position) also get their value_template rebuilt through the codec
   — so it adapts to the bridge payload shape rather than hardcoding
   `value_json.value`.
-- `<role>_stream` (state_stream/position_stream): "active" | "passive" (default
-  "passive"). Passive reads the retained `state` snapshot; active keeps only the
-  delta.
+- `<role>_stream` (state_stream/position_stream): "active" | "passive" | "derived"
+  (default "passive"). Passive reads the retained `state` snapshot; active keeps
+  only the delta; "derived" reads a code converter's `{type}=derived` DP (e.g. a
+  cover state folded from raw DPs by a `.py` and published via `api.derive`).
 - `invert_position: true` inverts the read direction (position_template emits
   `100 - value`); `invert_set_position: true` independently inverts the write
   direction (a `set_position_template` of `100 - value`).

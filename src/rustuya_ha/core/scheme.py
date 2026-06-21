@@ -172,7 +172,7 @@ class TopicScheme(Protocol):
 
     def discovery(self, component: str, dev_id: str, code: str) -> str: ...
     def state(self, dev_id: str, dp_id: str, active: bool = False,
-              passive: bool = False) -> str: ...
+              passive: bool = False, derived: bool = False) -> str: ...
     def command(self, dev_id: str, dp_id: str) -> str: ...
     def availability(self, dev_id: str) -> str: ...
 
@@ -189,7 +189,7 @@ class DefaultTopicScheme:
         return self.DISCOVERY.format(component, dev_id, code)
 
     def state(self, dev_id: str, dp_id: str, active: bool = False,
-              passive: bool = False) -> str:
+              passive: bool = False, derived: bool = False) -> str:
         return self.STATE.format(dev_id, dp_id)  # legacy topic has no {type}
 
     def command(self, dev_id: str, dp_id: str) -> str:
@@ -209,7 +209,9 @@ class BridgeTopicScheme:
         return HA_DISCOVERY_TOPIC.format(component, dev_id, code)
 
     def state(self, dev_id: str, dp_id: str, active: bool = False,
-              passive: bool = False) -> str:
+              passive: bool = False, derived: bool = False) -> str:
+        # `derived` = a manager-rendered derived DP ({type}=derived), e.g. a cover
+        # state folded from raw DPs by a code converter. The other types are
         # rustuya-bridge §Events: `active` = device push (Tuya cmd 8, wrapped
         # `data.dps`); `passive` = query response / periodic report (cmd 16, root
         # `dps`); `state` = retained full snapshot, emitted ONLY in cache mode
@@ -226,7 +228,9 @@ class BridgeTopicScheme:
         #     and the pass-through value_template emits no type filter, so the
         #     value is read regardless. (Absolute values are idempotent, so seeing
         #     both an active and a passive copy is harmless: last write wins.)
-        if active:
+        if derived:
+            mtype = "derived"
+        elif active:
             mtype = "active"
         elif passive:
             mtype = "passive"

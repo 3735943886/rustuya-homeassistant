@@ -126,9 +126,10 @@ class DiscoveryGenerator:
 
         Two kinds of keys:
         - structured — read roles (state, position) take `<role>_dp` (DP, resolved
-          to a topic via the scheme) and `<role>_stream` ("active"|"passive",
-          default "passive": passive reads the retained `state` snapshot, active
-          keeps only the delta). Either rebuilds the role's value_template through the codec
+          to a topic via the scheme) and `<role>_stream` ("active"|"passive"|
+          "derived", default "passive": passive reads the retained `state`
+          snapshot, active keeps only the delta, "derived" reads a code
+          converter's `{type}=derived` DP). Either rebuilds the role's value_template through the codec
           (payload-shape adaptation kept, not hardcoded). `invert_position: true`
           inverts the read direction (position_template emits `100 - value`);
           `invert_set_position: true` independently inverts the write direction
@@ -169,10 +170,12 @@ class DiscoveryGenerator:
                 else:
                     continue  # role not present on this entity
                 active = stream == "active"
-                # Re-emit the topic only when the dp or the stream's active flag
-                # was actually chosen (a pure invert leaves the builder's topic).
+                derived = stream == "derived"
+                # Re-emit the topic only when the dp or the stream was actually
+                # chosen (a pure invert leaves the builder's topic). `derived`
+                # points the read at a code converter's {type}=derived DP.
                 if has_dp or stream is not None:
-                    payload[topic_field] = self.scheme.state(dev_id, dp, active=active)
+                    payload[topic_field] = self.scheme.state(dev_id, dp, active=active, derived=derived)
                 payload[tmpl_field] = self.codec.value_template(
                     comp, dp_id=dp, active_only=active,
                     transform="100 - ((%s) | int)" if invert else None)
