@@ -140,3 +140,21 @@ jobs:
           # rc / a / b / dev tags are pre-releases; a bare vX.Y.Z is a full release.
           prerelease: ${{ contains(github.ref_name, 'rc') || contains(github.ref_name, 'a') || contains(github.ref_name, 'b') || contains(github.ref_name, 'dev') }}
           generate_release_notes: true
+
+  notify-catalog:
+    # Nudge rustuya-manager to refresh its plugin catalog now, instead of waiting
+    # for its daily cron — so a fresh release is downloadable from the manager UI
+    # immediately. Cross-repo, so it needs a PAT: the default GITHUB_TOKEN can't
+    # reach another repo. Without the secret the step simply no-ops (the daily
+    # cron still covers it). PAT scope: rustuya-manager → Contents: write.
+    needs: release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.CATALOG_BOT_TOKEN }}
+    steps:
+      - name: Dispatch catalog sync to rustuya-manager
+        if: ${{ env.GH_TOKEN != '' }}
+        run: |
+          gh api --method POST repos/3735943886/rustuya-manager/dispatches \
+            -f event_type=plugin-released
