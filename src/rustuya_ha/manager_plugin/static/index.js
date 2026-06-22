@@ -1011,7 +1011,13 @@ async function updateDefaultConverters(ctx, view, rerender) {
     if ((res.failed || []).length) {
       ctx.toast && ctx.toast(t("conv.packFailed", { count: res.failed.length }), "error");
     }
-    if (res.restart_required) ctx.toast && ctx.toast(t("conv.restartNote"), "ok");
+    if (res.restart_required) {
+      ctx.toast && ctx.toast(t("conv.restartNote"), "ok");
+      // Persist an amber attention dot on the header "Restart manager" item
+      // (manager rc60+) so the cue survives leaving this tab and stays until an
+      // actual restart reloads the page. Feature-detected for older hosts.
+      ctx.setHeaderAttention && ctx.setHeaderAttention("restart-btn", true);
+    }
     c.loaded = false; // re-fetch the file list + pack state
     await loadConvFiles(ctx, view, rerender);
   } catch (e) {
@@ -1084,7 +1090,13 @@ async function saveConvFile(ctx, view, rerender) {
     });
     ctx.toast &&
       ctx.toast(t("conv.savedFile", { name: res.name }) + (res.backup ? t("toast.backupSuffix") : ""), "ok");
-    if (res.restart_required) ctx.toast && ctx.toast(t("conv.restartNote"), "ok");
+    if (res.restart_required) {
+      ctx.toast && ctx.toast(t("conv.restartNote"), "ok");
+      // Persist an amber attention dot on the header "Restart manager" item
+      // (manager rc60+) so the cue survives leaving this tab and stays until an
+      // actual restart reloads the page. Feature-detected for older hosts.
+      ctx.setHeaderAttention && ctx.setHeaderAttention("restart-btn", true);
+    }
     c.creating = false;
     c.selected = res.name;
     c.kind = res.kind;

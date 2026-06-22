@@ -35,5 +35,16 @@
         "payload_stop": "stop"
       }
     }
+  },
+  "3i3exuay": {
+    "discovery_overrides": {
+      "cover": {
+        "state_dp": "99",
+        "state_stream": "derived",
+        "payload_open": "open",
+        "payload_close": "close",
+        "payload_stop": "stop"
+      }
+    }
   }
 }
