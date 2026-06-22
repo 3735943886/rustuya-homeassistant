@@ -1222,41 +1222,52 @@ function renderConverters(ctx, view, rerender) {
       wrap.appendChild(nameInput);
     }
     // Dirty = a new draft, or edited away from the on-disk baseline. Drives the
-    // Save/Cancel enablement and the unsaved marker.
-    const isDirty = c.creating || c.content !== (c.original || "");
+    // Save/Cancel enablement, the unsaved marker, and the textarea border —
+    // updated imperatively on each keystroke (syncDirty) so they react instantly
+    // without a re-render that would fight the caret. The dirty bits are toggled,
+    // not rebuilt, so typing never triggers a DOM teardown.
+    const DIRTY_BORDER = ["border-amber-400", "dark:border-amber-500/70"];
+    const CLEAN_BORDER = ["border-slate-300", "dark:border-slate-600"];
     const ta = el(
       "textarea",
       "w-full h-48 font-mono text-xs p-2 rounded border " +
-        (isDirty
-          ? "border-amber-400 dark:border-amber-500/70 "
-          : "border-slate-300 dark:border-slate-600 ") +
         "bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100",
     );
     ta.value = c.content;
     ta.dataset.keepFocus = "conv-text";
     ta.spellcheck = false;
     ta.placeholder = t("conv.contentPh");
-    ta.addEventListener("input", () => {
-      c.content = ta.value;
-      c.dirty = true;
-    });
     wrap.appendChild(ta);
 
     const acts = el("div", "flex flex-wrap gap-2 mt-2 items-center");
     const saveBtn = btn(t("common.save"), BTN_PRIMARY, () => saveConvFile(ctx, view, rerender));
-    saveBtn.disabled = !isDirty; // BTN_BASE styles disabled as muted
     acts.appendChild(saveBtn);
-    if (isDirty) {
-      acts.appendChild(btn(t("conv.cancel"), BTN_GHOST, () => cancelConvEdit(view, rerender)));
-      acts.appendChild(
-        el("span", "text-[11px] font-medium text-amber-600 dark:text-amber-400", `● ${t("conv.unsaved")}`),
-      );
-    }
+    const cancelBtn = btn(t("conv.cancel"), BTN_GHOST, () => cancelConvEdit(view, rerender));
+    acts.appendChild(cancelBtn);
+    const unsavedSpan = el(
+      "span", "text-[11px] font-medium text-amber-600 dark:text-amber-400", `● ${t("conv.unsaved")}`,
+    );
+    acts.appendChild(unsavedSpan);
     if (!c.creating && c.selected) {
       acts.appendChild(btn(t("conv.deleteFile"), BTN_DANGER, () => deleteConvFile(ctx, view, rerender)));
     }
     acts.appendChild(el("span", "text-xs text-slate-400 ml-auto break-all", t("conv.dir", { path: c.dir || "?" })));
     wrap.appendChild(acts);
+
+    function syncDirty() {
+      const dirty = c.creating || c.content !== (c.original || "");
+      saveBtn.disabled = !dirty; // BTN_BASE styles disabled as muted
+      cancelBtn.classList.toggle("hidden", !dirty);
+      unsavedSpan.classList.toggle("hidden", !dirty);
+      ta.classList.remove(...DIRTY_BORDER, ...CLEAN_BORDER);
+      ta.classList.add(...(dirty ? DIRTY_BORDER : CLEAN_BORDER));
+    }
+    ta.addEventListener("input", () => {
+      c.content = ta.value;
+      c.dirty = true;
+      syncDirty();
+    });
+    syncDirty(); // initial state (clean on open, dirty for a new draft)
   } else {
     wrap.appendChild(
       el(
