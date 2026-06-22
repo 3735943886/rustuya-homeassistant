@@ -1356,6 +1356,39 @@ export async function mount(rootEl, ctx) {
     render();
   }
 
+  // Defer a live re-paint while the user is mid-gesture — a drag, an open native
+  // <select> (the converters file picker), or a live text selection — so an
+  // incoming WS frame never rebuilds the DOM out from under them (the dropdown
+  // snapping shut / a drag "letting go" after a second). The latest frame is
+  // remembered and applied the moment the gesture ends, so nothing goes stale.
+  let pendingData; // last skipped payload (undefined = none pending)
+  let pointerDown = false;
+  function interacting() {
+    if (pointerDown) return true;
+    const a = document.activeElement;
+    if (a && a.tagName === "SELECT") return true; // open dropdown keeps focus
+    const sel = window.getSelection && window.getSelection();
+    return !!(sel && sel.type === "Range" && String(sel).length);
+  }
+  function paintFromPush(data) {
+    if (interacting()) pendingData = data;
+    else paint(data);
+  }
+  function flushPending() {
+    if (pendingData !== undefined && !interacting()) {
+      const d = pendingData;
+      pendingData = undefined;
+      paint(d);
+    }
+  }
+  const onPointerDown = () => { pointerDown = true; };
+  const onPointerUp = () => { pointerDown = false; flushPending(); };
+  const onFocusOut = () => setTimeout(flushPending, 0);
+  document.addEventListener("pointerdown", onPointerDown, true);
+  document.addEventListener("pointerup", onPointerUp, true);
+  document.addEventListener("selectionchange", flushPending);
+  document.addEventListener("focusout", onFocusOut);
+
   // Seed from the WS snapshot if it already carries our namespace, else fetch.
   const snap = ctx.getState && ctx.getState();
   const initial = snap && snap.plugins && snap.plugins.discovery;
@@ -1368,10 +1401,11 @@ export async function mount(rootEl, ctx) {
     }
   }
 
-  // Live updates: re-paint whenever our namespace changes in the WS snapshot.
+  // Live updates: re-paint whenever our namespace changes in the WS snapshot —
+  // deferred while the user is mid-gesture (see paintFromPush).
   const unsub = ctx.onState((s) => {
     const d = s && s.plugins && s.plugins.discovery;
-    if (d) paint(d);
+    if (d) paintFromPush(d);
   });
 
   // Follow the shell's language when it switches (manager rc49+). applyDom() only
@@ -1386,5 +1420,9 @@ export async function mount(rootEl, ctx) {
   return () => {
     unsub && unsub();
     unsubLang && unsubLang();
+    document.removeEventListener("pointerdown", onPointerDown, true);
+    document.removeEventListener("pointerup", onPointerUp, true);
+    document.removeEventListener("selectionchange", flushPending);
+    document.removeEventListener("focusout", onFocusOut);
   };
 }
