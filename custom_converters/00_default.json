@@ -13,7 +13,6 @@
     }
   },
   "f6jujmx0is5td50x": {
-    "model": "curtain motor",
     "discovery_overrides": {
       "cover": {
         "position_dp": "2",
@@ -27,7 +26,6 @@
     }
   },
   "h2wipnagcunsar5r": {
-    "model": "智能窗帘电机",
     "discovery_overrides": {
       "cover": {
         "state_dp": "99",
