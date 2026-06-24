@@ -339,15 +339,22 @@ class DiscoveryPlugin:
             e["device_ids"].append(did)
             e["device_names"].append(raw.get("name", did))
         pack_dir = converter.savable_dir(None)
+        ledger = pack.read_ledger(pack_dir)
+        # Flag pack-managed files so the editor can show them read-only: editing one
+        # is futile (the next pack sync overwrites it), so users customize by
+        # creating their own file. The ledger is the authoritative owner record.
+        files = converter.list_files()
+        for f in files:
+            f["managed"] = f["name"] in ledger
         return {
             "dir": str(pack_dir),
-            "files": converter.list_files(),
+            "files": files,
             "products": sorted(products.values(), key=lambda x: x["product_id"]),
             # Default-converter pack state, so the UI can offer "get the defaults"
             # on a fresh install vs "update" once they're present.
             "pack": {
                 "synced": pack.has_synced(pack_dir),
-                "managed": len(pack.read_ledger(pack_dir)),
+                "managed": len(ledger),
             },
         }
 
@@ -395,12 +402,25 @@ class DiscoveryPlugin:
             except SyntaxError as e:
                 raise ValueError(f"Python syntax error: {e}") from e
 
+    def _assert_editable(self, name: str) -> None:
+        """Reject writing/deleting a pack-managed (default) converter — the next
+        `update_default_converters` sync overwrites it anyway, so editing it in
+        place is a trap. Users customize by creating their own file (which
+        deep-merges on top). The pack ledger is the authoritative owner record."""
+        if name in pack.read_ledger(converter.savable_dir(None)):
+            raise ValueError(
+                f"{name} is a default-pack converter and is read-only — "
+                "copy it to a new file to customize"
+            )
+
     def save_converter_file(self, name: str, content: str) -> Dict[str, Any]:
         """Create/overwrite one converter file. Validates first (JSON shape +
         generation, or Python syntax), backs up any prior version, writes, and —
         for a JSON file — reloads the generator. A `.py` change needs a manager
-        restart to take effect (restart_required)."""
+        restart to take effect (restart_required). Pack-managed defaults are
+        read-only (ValueError → 400)."""
         target = converter.file_path(name)  # validates the name (ValueError → 400)
+        self._assert_editable(target.name)
         self._validate_converter_file(name, content)
         backup_path = backup.snapshot_file(self.backup_dir, str(target), prefix="converters")
         path = converter.write_file(name, content)
@@ -427,6 +447,7 @@ class DiscoveryPlugin:
         """Delete one converter file (backing it up first). Reloads the generator
         for a JSON file; a `.py` removal needs a restart to fully unload it."""
         target = converter.file_path(name)  # validates the name
+        self._assert_editable(target.name)
         backup_path = backup.snapshot_file(self.backup_dir, str(target), prefix="converters")
         converter.delete_file(name)
         is_json = name.endswith(".json")

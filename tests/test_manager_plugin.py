@@ -497,6 +497,34 @@ def test_save_converter_file_rejects_bad_content(monkeypatch, tmp_path):
     assert list(d.iterdir()) == []  # nothing persisted on any refusal
 
 
+def test_pack_managed_files_are_read_only(monkeypatch, tmp_path):
+    d = _isolated_converters(monkeypatch, tmp_path)
+    p = DiscoveryPlugin(FakeCtx(devices=DEVICES, bridge_cfg=LEGACY_CFG))
+    p.backup_dir = str(tmp_path / "bk")
+    pid = DEVICES[0]["product_id"]
+    # A pack-managed default (recorded in the ledger) sits next to a user file.
+    (d / "00_default.json").write_text(json.dumps({pid: {"model": "PACK"}}))
+    (d / ".rustuya_pack.json").write_text(json.dumps({"version": 1, "files": {"00_default.json": "x"}}))
+    p.save_converter_file("99_mine.json", json.dumps({pid: {"model": "MINE"}}))
+
+    # converters_files flags which files the pack owns
+    by_name = {f["name"]: f for f in p.converters_files()["files"]}
+    assert by_name["00_default.json"]["managed"] is True
+    assert by_name["99_mine.json"]["managed"] is False
+
+    # the managed default is read-only: save + delete both refused, file untouched
+    with pytest.raises(ValueError, match="read-only"):
+        p.save_converter_file("00_default.json", json.dumps({pid: {"model": "HACK"}}))
+    with pytest.raises(ValueError, match="read-only"):
+        p.delete_converter_file("00_default.json")
+    assert json.load(open(d / "00_default.json"))[pid]["model"] == "PACK"
+
+    # a user file is still editable + deletable
+    p.save_converter_file("99_mine.json", json.dumps({pid: {"model": "MINE2"}}))
+    p.delete_converter_file("99_mine.json")
+    assert not (d / "99_mine.json").exists()
+
+
 def test_save_converter_file_replaces_file(monkeypatch, tmp_path):
     d = _isolated_converters(monkeypatch, tmp_path)
     ctx = FakeCtx(devices=DEVICES, bridge_cfg=LEGACY_CFG)

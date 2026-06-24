@@ -1028,110 +1028,218 @@ async function updateDefaultConverters(ctx, view, rerender) {
   }
 }
 
-async function openConvFile(ctx, view, name, rerender) {
+// Full-screen modal editor for one converter file. `file` is a c.files entry
+// (or null to create). Pack-managed (default) files open read-only — editing one
+// is futile (the next pack update overwrites it), so a "copy to a new file"
+// action seeds an editable draft instead. `seed` ({name, content}) prefills a new
+// draft (used by copy-to-new). Self-contained, appended to <body> like the
+// apply/restore modals.
+async function openConvEditor(ctx, view, file, rerender, seed) {
   const c = view.conv;
-  try {
-    const f = await ctx.api(`/api/discovery/converters/file?name=${encodeURIComponent(name)}`);
-    c.selected = f.name;
-    c.kind = f.kind;
-    c.content = f.content;
-    c.original = f.content; // baseline for dirty/revert
-    c.creating = false;
-    c.dirty = false;
-    rerender();
-  } catch (e) {
-    ctx.toast && ctx.toast(`${t("conv.label")}: ${e.message}`, "error");
-  }
-}
-
-function startNewConvFile(view, rerender) {
-  const c = view.conv;
-  c.creating = true;
-  c.selected = null;
-  c.newName = "";
-  c.content = "";
-  c.original = "";
-  c.kind = "json";
-  c.dirty = false;
-  rerender();
-}
-
-// Revert unsaved edits: a new-file draft is discarded (back to the picker); an
-// existing file is restored to its on-disk baseline. Keeps the section open.
-function cancelConvEdit(view, rerender) {
-  const c = view.conv;
-  if (c.creating) {
-    c.creating = false;
-    c.newName = "";
-    c.content = "";
-    c.original = "";
-  } else {
-    c.content = c.original || "";
-  }
-  c.dirty = false;
-  rerender();
-}
-
-async function saveConvFile(ctx, view, rerender) {
-  const c = view.conv;
-  const name = (c.creating ? c.newName : c.selected || "").trim();
-  if (!name) {
-    ctx.toast && ctx.toast(t("conv.needName"), "error");
-    return;
-  }
-  if (!/\.(json|py)$/.test(name)) {
-    ctx.toast && ctx.toast(t("conv.badName"), "error");
-    return;
-  }
-  try {
-    const res = await ctx.api("/api/discovery/converters/file", {
-      method: "POST",
-      body: { name, content: c.content },
-    });
-    ctx.toast &&
-      ctx.toast(t("conv.savedFile", { name: res.name }) + (res.backup ? t("toast.backupSuffix") : ""), "ok");
-    if (res.restart_required) {
-      ctx.toast && ctx.toast(t("conv.restartNote"), "ok");
-      // Persist an amber attention dot on the header "Restart manager" item
-      // (manager rc60+) so the cue survives leaving this tab and stays until an
-      // actual restart reloads the page. Feature-detected for older hosts.
-      ctx.setHeaderAttention && ctx.setHeaderAttention("restart-btn", true);
+  const creating = !file;
+  const managed = !!(file && file.managed);
+  let name = creating ? (seed ? seed.name : "") : file.name;
+  let content = seed ? seed.content : "";
+  if (file) {
+    try {
+      const f = await ctx.api(`/api/discovery/converters/file?name=${encodeURIComponent(file.name)}`);
+      content = f.content;
+    } catch (e) {
+      ctx.toast && ctx.toast(`${t("conv.label")}: ${e.message}`, "error");
+      return;
     }
-    c.creating = false;
-    c.selected = res.name;
-    c.kind = res.kind;
-    c.original = c.content; // saved content is the new baseline
-    c.dirty = false;
-    await loadConvFiles(ctx, view, rerender);
-  } catch (e) {
-    ctx.toast && ctx.toast(`${t("common.save")}: ${e.message}`, "error");
   }
-}
+  const original = content;
+  let busy = false;
 
-async function deleteConvFile(ctx, view, rerender) {
-  const c = view.conv;
-  if (!c.selected) return;
-  const name = c.selected;
-  const ok = ctx.confirm
-    ? await ctx.confirm({
-        title: t("conv.deleteFileTitle"),
-        message: t("conv.deleteFileMsg", { name }),
-        okLabel: t("action.delete"),
-        danger: true,
-      })
-    : true;
-  if (!ok) return;
-  try {
-    const res = await ctx.api("/api/discovery/converters/file/delete", { method: "POST", body: { name } });
-    ctx.toast &&
-      ctx.toast(t("conv.deletedFile", { name }) + (res.backup ? t("toast.backupSuffix") : ""), "ok");
-    c.selected = null;
-    c.content = "";
-    c.creating = false;
-    await loadConvFiles(ctx, view, rerender);
-  } catch (e) {
-    ctx.toast && ctx.toast(`${t("action.delete")}: ${e.message}`, "error");
+  const overlay = el("div", "fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4");
+  const panel = el(
+    "div",
+    "bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 rounded-lg shadow-xl " +
+      "w-full max-w-4xl h-[88vh] flex flex-col",
+  );
+  overlay.appendChild(panel);
+
+  const head = el("div", "px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2");
+  head.appendChild(el("h3", "text-sm font-semibold font-mono truncate", creating ? t("conv.newFile") : name));
+  if (managed)
+    head.appendChild(
+      el(
+        "span",
+        "text-[11px] px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 shrink-0",
+        t("conv.managedBadge"),
+      ),
+    );
+  const closeX = iconBtn("✕", t("common.close"), () => maybeClose());
+  closeX.classList.add("ml-auto");
+  head.appendChild(closeX);
+  panel.appendChild(head);
+
+  const bodyEl = el("div", "p-3 flex-1 flex flex-col min-h-0 gap-2");
+  let nameInput = null;
+  if (creating) {
+    nameInput = el(
+      "input",
+      "w-full text-xs font-mono px-2 py-1 rounded border border-slate-300 dark:border-slate-600 " +
+        "bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100",
+    );
+    nameInput.placeholder = t("conv.filenamePh");
+    nameInput.value = name;
+    nameInput.addEventListener("input", () => {
+      name = nameInput.value;
+      syncDirty();
+    });
+    bodyEl.appendChild(nameInput);
   }
+  if (managed) bodyEl.appendChild(el("div", "text-xs text-slate-500 dark:text-slate-400", t("conv.managedNote")));
+
+  const DIRTY_BORDER = ["border-amber-400", "dark:border-amber-500/70"];
+  const CLEAN_BORDER = ["border-slate-300", "dark:border-slate-600"];
+  const ta = el(
+    "textarea",
+    "w-full flex-1 min-h-0 font-mono text-xs p-2 rounded border resize-none " +
+      "bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100",
+  );
+  ta.value = content;
+  ta.spellcheck = false;
+  ta.placeholder = t("conv.contentPh");
+  if (managed) {
+    ta.readOnly = true;
+    ta.classList.add("opacity-70", ...CLEAN_BORDER);
+  } else {
+    ta.addEventListener("input", () => {
+      content = ta.value;
+      syncDirty();
+    });
+  }
+  bodyEl.appendChild(ta);
+  panel.appendChild(bodyEl);
+
+  const foot = el(
+    "div",
+    "px-4 py-3 border-t border-slate-200 dark:border-slate-700 flex items-center gap-2 flex-wrap",
+  );
+  panel.appendChild(foot);
+
+  let saveBtn = null;
+  let unsavedSpan = null;
+  if (managed) {
+    foot.appendChild(el("span", "text-xs text-slate-500 dark:text-slate-400", t("conv.managedReadonly")));
+    foot.appendChild(
+      btn(`⧉ ${t("conv.copyToNew")}`, BTN_PRIMARY, () => {
+        const suggested = /^00_/.test(name) ? name.replace(/^00_/, "99_") : `99_${name}`;
+        close();
+        openConvEditor(ctx, view, null, rerender, { name: suggested, content });
+      }),
+    );
+    foot.appendChild(el("span", "text-xs text-slate-400 ml-auto break-all", t("conv.dir", { path: c.dir || "?" })));
+    foot.appendChild(btn(t("common.close"), BTN_GHOST, () => close()));
+  } else {
+    saveBtn = btn(t("common.save"), BTN_PRIMARY, () => doSave());
+    foot.appendChild(saveBtn);
+    if (!creating) foot.appendChild(btn(t("conv.deleteFile"), BTN_DANGER, () => doDelete()));
+    unsavedSpan = el("span", "text-[11px] font-medium text-amber-600 dark:text-amber-400", `● ${t("conv.unsaved")}`);
+    foot.appendChild(unsavedSpan);
+    foot.appendChild(el("span", "text-xs text-slate-400 ml-auto break-all", t("conv.dir", { path: c.dir || "?" })));
+  }
+
+  function dirtyNow() {
+    return creating ? content.trim() !== "" || name.trim() !== "" : content !== original;
+  }
+  function syncDirty() {
+    if (managed) return;
+    const dirty = dirtyNow();
+    saveBtn.disabled = busy || !dirty;
+    unsavedSpan.classList.toggle("hidden", !dirty);
+    ta.classList.remove(...DIRTY_BORDER, ...CLEAN_BORDER);
+    ta.classList.add(...(dirty ? DIRTY_BORDER : CLEAN_BORDER));
+  }
+
+  function close() {
+    document.removeEventListener("keydown", onKey);
+    overlay.remove();
+  }
+  async function maybeClose() {
+    if (!managed && !busy && dirtyNow() && ctx.confirm) {
+      const ok = await ctx.confirm({
+        title: t("conv.discardTitle"),
+        message: t("conv.discardMsg"),
+        okLabel: t("conv.discardOk"),
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    close();
+  }
+  function onKey(e) {
+    if (e.key === "Escape") maybeClose();
+  }
+  document.addEventListener("keydown", onKey);
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) maybeClose();
+  });
+
+  async function doSave() {
+    const fname = (name || "").trim();
+    if (!fname) {
+      ctx.toast && ctx.toast(t("conv.needName"), "error");
+      return;
+    }
+    if (!/\.(json|py)$/.test(fname)) {
+      ctx.toast && ctx.toast(t("conv.badName"), "error");
+      return;
+    }
+    busy = true;
+    syncDirty();
+    try {
+      const res = await ctx.api("/api/discovery/converters/file", {
+        method: "POST",
+        body: { name: fname, content },
+      });
+      ctx.toast &&
+        ctx.toast(t("conv.savedFile", { name: res.name }) + (res.backup ? t("toast.backupSuffix") : ""), "ok");
+      if (res.restart_required) {
+        ctx.toast && ctx.toast(t("conv.restartNote"), "ok");
+        // Persist an amber attention dot on the header "Restart manager" item
+        // (manager rc60+) so the cue survives leaving this tab and stays until an
+        // actual restart reloads the page. Feature-detected for older hosts.
+        ctx.setHeaderAttention && ctx.setHeaderAttention("restart-btn", true);
+      }
+      close();
+      c.loaded = false;
+      await loadConvFiles(ctx, view, rerender);
+    } catch (e) {
+      busy = false;
+      syncDirty();
+      ctx.toast && ctx.toast(`${t("common.save")}: ${e.message}`, "error");
+    }
+  }
+
+  async function doDelete() {
+    const ok = ctx.confirm
+      ? await ctx.confirm({
+          title: t("conv.deleteFileTitle"),
+          message: t("conv.deleteFileMsg", { name }),
+          okLabel: t("action.delete"),
+          danger: true,
+        })
+      : true;
+    if (!ok) return;
+    try {
+      const res = await ctx.api("/api/discovery/converters/file/delete", { method: "POST", body: { name } });
+      ctx.toast &&
+        ctx.toast(t("conv.deletedFile", { name }) + (res.backup ? t("toast.backupSuffix") : ""), "ok");
+      close();
+      c.loaded = false;
+      await loadConvFiles(ctx, view, rerender);
+    } catch (e) {
+      ctx.toast && ctx.toast(`${t("action.delete")}: ${e.message}`, "error");
+    }
+  }
+
+  if (!managed) syncDirty();
+  document.body.appendChild(overlay);
+  (nameInput || ta).focus();
 }
 
 function renderConverters(ctx, view, rerender) {
@@ -1168,24 +1276,26 @@ function renderConverters(ctx, view, rerender) {
     const og = el("optgroup");
     og.label = glabel;
     for (const f of files) {
-      const o = el("option", null, f.name);
+      // 🔒 marks a pack-managed default — it opens read-only in the editor.
+      const o = el("option", null, (f.managed ? "🔒 " : "") + f.name);
       o.value = f.name;
       og.appendChild(o);
     }
     sel.appendChild(og);
   }
-  sel.value = !c.creating && c.selected ? c.selected : "";
+  sel.value = "";
   sel.disabled = c.files.length === 0;
   sel.addEventListener("change", () => {
-    if (sel.value) openConvFile(ctx, view, sel.value, rerender);
+    const f = c.files.find((x) => x.name === sel.value);
+    sel.value = ""; // a picker, not a persistent selection — opening is a modal
+    if (f) openConvEditor(ctx, view, f, rerender);
   });
   bar.appendChild(sel);
-  const addCls = c.creating
-    ? "bg-slate-700 text-white border-slate-700 dark:bg-slate-200 dark:text-slate-900"
-    : "border-dashed border-slate-400 text-slate-500 dark:text-slate-400";
   bar.appendChild(
-    btn(`＋ ${t("conv.newFile")}`, `px-2 py-1 rounded border text-xs ${addCls}`, () =>
-      startNewConvFile(view, rerender),
+    btn(
+      `＋ ${t("conv.newFile")}`,
+      "px-2 py-1 rounded border text-xs border-dashed border-slate-400 text-slate-500 dark:text-slate-400",
+      () => openConvEditor(ctx, view, null, rerender),
     ),
   );
   // Pull the curated default-converter pack from GitHub (independent of the
@@ -1206,77 +1316,15 @@ function renderConverters(ctx, view, rerender) {
   bar.appendChild(packBtn);
   wrap.appendChild(bar);
 
-  if (c.creating || c.selected) {
-    if (c.creating) {
-      const nameInput = el(
-        "input",
-        "w-full text-xs font-mono px-2 py-1 mb-2 rounded border border-slate-300 dark:border-slate-600 " +
-          "bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100",
-      );
-      nameInput.placeholder = t("conv.filenamePh");
-      nameInput.value = c.newName || "";
-      nameInput.dataset.keepFocus = "conv-name";
-      nameInput.addEventListener("input", () => {
-        c.newName = nameInput.value;
-      });
-      wrap.appendChild(nameInput);
-    }
-    // Dirty = a new draft, or edited away from the on-disk baseline. Drives the
-    // Save/Cancel enablement, the unsaved marker, and the textarea border —
-    // updated imperatively on each keystroke (syncDirty) so they react instantly
-    // without a re-render that would fight the caret. The dirty bits are toggled,
-    // not rebuilt, so typing never triggers a DOM teardown.
-    const DIRTY_BORDER = ["border-amber-400", "dark:border-amber-500/70"];
-    const CLEAN_BORDER = ["border-slate-300", "dark:border-slate-600"];
-    const ta = el(
-      "textarea",
-      "w-full h-48 font-mono text-xs p-2 rounded border " +
-        "bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100",
-    );
-    ta.value = c.content;
-    ta.dataset.keepFocus = "conv-text";
-    ta.spellcheck = false;
-    ta.placeholder = t("conv.contentPh");
-    wrap.appendChild(ta);
-
-    const acts = el("div", "flex flex-wrap gap-2 mt-2 items-center");
-    const saveBtn = btn(t("common.save"), BTN_PRIMARY, () => saveConvFile(ctx, view, rerender));
-    acts.appendChild(saveBtn);
-    const cancelBtn = btn(t("conv.cancel"), BTN_GHOST, () => cancelConvEdit(view, rerender));
-    acts.appendChild(cancelBtn);
-    const unsavedSpan = el(
-      "span", "text-[11px] font-medium text-amber-600 dark:text-amber-400", `● ${t("conv.unsaved")}`,
-    );
-    acts.appendChild(unsavedSpan);
-    if (!c.creating && c.selected) {
-      acts.appendChild(btn(t("conv.deleteFile"), BTN_DANGER, () => deleteConvFile(ctx, view, rerender)));
-    }
-    acts.appendChild(el("span", "text-xs text-slate-400 ml-auto break-all", t("conv.dir", { path: c.dir || "?" })));
-    wrap.appendChild(acts);
-
-    function syncDirty() {
-      const dirty = c.creating || c.content !== (c.original || "");
-      saveBtn.disabled = !dirty; // BTN_BASE styles disabled as muted
-      cancelBtn.classList.toggle("hidden", !dirty);
-      unsavedSpan.classList.toggle("hidden", !dirty);
-      ta.classList.remove(...DIRTY_BORDER, ...CLEAN_BORDER);
-      ta.classList.add(...(dirty ? DIRTY_BORDER : CLEAN_BORDER));
-    }
-    ta.addEventListener("input", () => {
-      c.content = ta.value;
-      c.dirty = true;
-      syncDirty();
-    });
-    syncDirty(); // initial state (clean on open, dirty for a new draft)
-  } else {
-    wrap.appendChild(
-      el(
-        "div",
-        "text-xs text-slate-500 dark:text-slate-400 py-2",
-        c.files.length ? t("conv.pickFile") : t("conv.noFiles"),
-      ),
-    );
-  }
+  // Editing happens in a full-screen modal (openConvEditor) opened from the
+  // dropdown / "new file"; the section itself just shows a hint.
+  wrap.appendChild(
+    el(
+      "div",
+      "text-xs text-slate-500 dark:text-slate-400 py-2",
+      c.files.length ? t("conv.pickFile") : t("conv.noFiles"),
+    ),
+  );
 
   return wrap;
 }
