@@ -100,7 +100,7 @@
   "conv.packUpToDate": "default converters already up to date",
   "conv.packFailed": "{count} file(s) failed to update",
   "conv.managedBadge": "default",
-  "conv.managedNote": "A default-pack converter. The next \"update defaults\" overwrites edits here — copy it to a new file to customize.",
+  "conv.managedNote": "A default-pack converter. Copy it to a new file to customize.",
   "conv.managedReadonly": "read-only default",
   "conv.copyToNew": "Copy to a new file",
   "conv.discardTitle": "Discard changes?",

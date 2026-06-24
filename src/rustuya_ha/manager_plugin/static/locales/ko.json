@@ -100,10 +100,10 @@
   "conv.packUpToDate": "기본 컨버터가 이미 최신입니다",
   "conv.packFailed": "{count}개 파일 업데이트 실패",
   "conv.managedBadge": "기본",
-  "conv.managedNote": "기본 팩 컨버터입니다. 다음 \"기본 업데이트\" 때 여기 편집은 덮어써집니다 — 커스터마이즈하려면 새 파일로 복사하세요.",
+  "conv.managedNote": "기본 팩 컨버터입니다. 커스터마이즈하려면 새 파일로 복사하세요.",
   "conv.managedReadonly": "읽기 전용 기본",
   "conv.copyToNew": "새 파일로 복사",
-  "conv.discardTitle": "변경 취소?",
+  "conv.discardTitle": "변경 내용을 버릴까요?",
   "conv.discardMsg": "저장하지 않은 편집이 있습니다.",
-  "conv.discardOk": "취소"
+  "conv.discardOk": "버리기"
 }
