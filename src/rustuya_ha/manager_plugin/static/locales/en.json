@@ -105,5 +105,7 @@
   "conv.copyToNew": "Copy to a new file",
   "conv.discardTitle": "Discard changes?",
   "conv.discardMsg": "You have unsaved edits.",
-  "conv.discardOk": "Discard"
+  "conv.discardOk": "Discard",
+  "conv.saveError": "Save failed",
+  "conv.deleteError": "Delete failed"
 }

@@ -1034,6 +1034,18 @@ async function updateDefaultConverters(ctx, view, rerender) {
 // action seeds an editable draft instead. `seed` ({name, content}) prefills a new
 // draft (used by copy-to-new). Self-contained, appended to <body> like the
 // apply/restore modals.
+// Unwrap a host API error for display. ctx.api throws with the raw response
+// body as `.message`, which for our endpoints is `{"detail":"..."}`. Surface
+// just the detail so toasts read cleanly instead of dumping raw JSON.
+function apiErr(e) {
+  let m = (e && e.message) || String(e);
+  try {
+    const j = JSON.parse(m);
+    if (j && typeof j.detail === "string") m = j.detail;
+  } catch {}
+  return m;
+}
+
 async function openConvEditor(ctx, view, file, rerender, seed) {
   const c = view.conv;
   const creating = !file;
@@ -1211,7 +1223,7 @@ async function openConvEditor(ctx, view, file, rerender, seed) {
     } catch (e) {
       busy = false;
       syncDirty();
-      ctx.toast && ctx.toast(`${t("common.save")}: ${e.message}`, "error");
+      ctx.toast && ctx.toast(`${t("conv.saveError")} — ${apiErr(e)}`, "error");
     }
   }
 
@@ -1233,7 +1245,7 @@ async function openConvEditor(ctx, view, file, rerender, seed) {
       c.loaded = false;
       await loadConvFiles(ctx, view, rerender);
     } catch (e) {
-      ctx.toast && ctx.toast(`${t("action.delete")}: ${e.message}`, "error");
+      ctx.toast && ctx.toast(`${t("conv.deleteError")} — ${apiErr(e)}`, "error");
     }
   }
 

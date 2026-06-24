@@ -105,5 +105,7 @@
   "conv.copyToNew": "새 파일로 복사",
   "conv.discardTitle": "변경 내용을 버릴까요?",
   "conv.discardMsg": "저장하지 않은 편집이 있습니다.",
-  "conv.discardOk": "버리기"
+  "conv.discardOk": "버리기",
+  "conv.saveError": "저장 오류",
+  "conv.deleteError": "삭제 오류"
 }

@@ -408,10 +408,9 @@ class DiscoveryPlugin:
         place is a trap. Users customize by creating their own file (which
         deep-merges on top). The pack ledger is the authoritative owner record."""
         if name in pack.read_ledger(converter.savable_dir(None)):
-            raise ValueError(
-                f"{name} is a default-pack converter and is read-only — "
-                "copy it to a new file to customize"
-            )
+            # Terse, locale-agnostic: the UI surfaces this verbatim in a toast and
+            # shows the localized "copy to a new file" guidance separately.
+            raise ValueError(f"{name}: default-pack converter, read-only")
 
     def save_converter_file(self, name: str, content: str) -> Dict[str, Any]:
         """Create/overwrite one converter file. Validates first (JSON shape +
