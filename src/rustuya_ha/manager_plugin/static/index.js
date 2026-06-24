@@ -349,7 +349,7 @@ function renderControls(data, view, rerender) {
   sort.title = t("controls.sortTitle");
   const og = el("optgroup");
   og.label = t("controls.sortBy");
-  for (const val of ["category", "name", "id"]) {
+  for (const val of ["id", "name", "category"]) {
     const o = el("option", null, t("sort." + val));
     o.value = val;
     if (view.sort === val) o.selected = true;

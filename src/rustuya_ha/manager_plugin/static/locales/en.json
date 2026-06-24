@@ -27,7 +27,7 @@
   "toast.nothingToDo": "nothing to do",
   "toast.done": "done",
   "toast.backupSuffix": " · backup saved",
-  "controls.searchPlaceholder": "search name / id…",
+  "controls.searchPlaceholder": "search id / name…",
   "controls.clearSearch": "Clear",
   "controls.sortTitle": "Sort devices",
   "controls.sortBy": "sort by",
