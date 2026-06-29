@@ -13,6 +13,28 @@ rustuya-manager catalog consumes); the plain tag will publish to PyPI.
 
 ## [Unreleased]
 
+## [0.0.1rc22] — 2026-06-29
+
+### Changed
+
+- **Replaced the read-only bridge-config advisory with declared topic/retain
+  requirements.** rustuya-manager now offers a first-class mechanism
+  (`ctx.require_topic` / `ctx.require_retain`, host api_version ≥ 3) for a plugin
+  to declare the bridge topic scheme it depends on; the manager evaluates it
+  against the live config and surfaces any gap *with a guided fix* in its Info
+  panel — strictly better than a passive hint inside the plugin tab. So the
+  rc21 in-plugin advisory banner is removed and `register()` now declares, on a
+  v3+ host (no-op on older ones):
+  - `require_retain("HA Discovery")` — needs `mqtt_retain=True` so stateful
+    entities read the retained `state` snapshot and restore on HA restart.
+  - `require_topic("HA Discovery", "event", must_have=("type",))` — needs
+    `{type}` in the event topic so the retained snapshot is distinct from
+    transient active/passive deltas (no flicker). `{dp}` is deliberately not
+    required — the generator adapts to multi-DP and flat-command layouts.
+
+  (Payload-template validity is covered separately by the bridge binding, so it
+  isn't re-declared here.)
+
 ## [0.0.1rc21] — 2026-06-29
 
 ### Added

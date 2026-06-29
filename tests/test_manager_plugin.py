@@ -57,6 +57,9 @@ class FakeCtx:
         self.pages = []
         self.ns = FakeNamespace()
         self.bridge_client = FakeBridgeClient(connected=connected)
+        self.services = []
+        self.topic_requirements = []   # (source, template, must_have, must_not_have)
+        self.retain_required_by = []
 
     def devices(self):
         return dict(self._devices)
@@ -75,6 +78,15 @@ class FakeCtx:
 
     def add_page(self, id, label, *, static_dir, entry="index.js"):
         self.pages.append({"id": id, "label": label, "static_dir": static_dir})
+
+    def add_service(self, factory):
+        self.services.append(factory)
+
+    def require_topic(self, source, template, *, must_have=(), must_not_have=()):
+        self.topic_requirements.append((source, template, tuple(must_have), tuple(must_not_have)))
+
+    def require_retain(self, source):
+        self.retain_required_by.append(source)
 
 
 def _retained_for(devices, bridge_cfg=None):
@@ -575,6 +587,25 @@ def test_register_refuses_incompatible_api_version():
     ctx = FakeCtx(api_version=0)
     assert register(ctx) is None
     assert ctx.subscriptions == []
+
+
+def test_register_declares_topic_retain_requirements_on_v3_host():
+    pytest.importorskip("fastapi")
+    ctx = FakeCtx(devices=DEVICES, bridge_cfg=LEGACY_CFG, api_version=3)
+    register(ctx)
+    # retain=True and {type} in the event topic are what HA discovery needs for
+    # full fidelity; {dp} is deliberately not required (generator adapts).
+    assert ctx.retain_required_by == ["HA Discovery"]
+    assert ("HA Discovery", "event", ("type",), ()) in ctx.topic_requirements
+    assert all(t[1] != "command" for t in ctx.topic_requirements)
+
+
+def test_register_skips_requirements_on_pre_v3_host():
+    pytest.importorskip("fastapi")
+    ctx = FakeCtx(devices=DEVICES, bridge_cfg=LEGACY_CFG, api_version=2)
+    register(ctx)
+    assert ctx.retain_required_by == []
+    assert ctx.topic_requirements == []
 
 
 # ── code converters (api_version >= 2 reactive runtime) ──────────────────

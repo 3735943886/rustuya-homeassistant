@@ -28,7 +28,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 from ..core import backup, converter, pack, plan
-from ..core.bridge import BridgeConfig, advise
+from ..core.bridge import BridgeConfig
 from ..core.detail import device_detail, has_detail
 from ..core.generator import initialize_generator
 from ..core.restore import restore_plan
@@ -62,9 +62,6 @@ class DiscoveryPlugin:
         # topic -> {"payload": <parsed dict>, "retain": bool}
         self.retained: Dict[str, Dict[str, Any]] = {}
         self.config_source = "default"
-        # The resolved live BridgeConfig (None until a bridge config is seen);
-        # kept so summarize() can advise on suboptimal settings.
-        self.bridge_cfg: Optional[BridgeConfig] = None
         self.namespace = None  # set by register() to ctx.state_namespace(...)
         self.backup_dir = BACKUP_DIR
         self._dirty = False
@@ -78,10 +75,8 @@ class DiscoveryPlugin:
         cfg_dict = self.ctx.bridge_config()
         if cfg_dict:
             self.config_source = "bridge"
-            self.bridge_cfg = BridgeConfig.from_dict(cfg_dict)
-            return scheme_for(self.bridge_cfg)
+            return scheme_for(BridgeConfig.from_dict(cfg_dict))
         self.config_source = "default"
-        self.bridge_cfg = None
         return None
 
     def _apply_bridge_config(self) -> None:
@@ -172,9 +167,6 @@ class DiscoveryPlugin:
             "config_source": self.config_source,
             "retained_topics": len(self.retained),
             "errors": results.get("errors", []),
-            # Read-only hints on suboptimal bridge settings; only when we can
-            # actually see the live bridge config (never for the default guess).
-            "advice": advise(self.bridge_cfg) if self.bridge_cfg is not None else [],
         }
 
     def status(self) -> Dict[str, Any]:
@@ -506,6 +498,26 @@ def register(ctx: Any) -> None:
     plugin = DiscoveryPlugin(ctx)
     plugin.namespace = ctx.state_namespace(NAMESPACE)
     ctx.add_mqtt_subscription(f"{HA_PREFIX}/#", plugin.on_mqtt)
+
+    # Declare the bridge topic/retain scheme this plugin depends on (host
+    # api_version >= 3). The manager evaluates these against the live bridge
+    # config and surfaces any gap — with a guided fix — in its Info panel; we
+    # only declare, never touch the bridge config ourselves. No-op on older
+    # hosts. What HA discovery needs for full fidelity:
+    #   - mqtt_retain=True so stateful entities read the retained `state`
+    #     snapshot and restore on HA restart, instead of sitting unknown until
+    #     the device next reports.
+    #   - {type} in the event topic so the retained snapshot lands on its own
+    #     topic, distinct from transient active/passive deltas — otherwise an
+    #     absolute entity can briefly flicker on a passing delta.
+    # ({dp} is deliberately NOT required: the generator adapts to multi-DP and
+    # flat-command layouts, so demanding it would false-alarm on working setups.)
+    if getattr(ctx, "api_version", 0) >= 3:
+        try:
+            ctx.require_retain("HA Discovery")
+            ctx.require_topic("HA Discovery", "event", must_have=("type",))
+        except Exception:  # a declaration hiccup must never block startup
+            logger.debug("rustuya-ha: topic/retain requirements not declared", exc_info=True)
 
     # Load user Python code converters (custom_converters/*.py): per-device
     # derivation logic that reacts to decoded DPs and publishes derived DPs via
