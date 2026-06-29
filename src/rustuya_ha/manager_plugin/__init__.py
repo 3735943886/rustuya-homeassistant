@@ -28,7 +28,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 from ..core import backup, converter, pack, plan
-from ..core.bridge import BridgeConfig
+from ..core.bridge import BridgeConfig, advise
 from ..core.detail import device_detail, has_detail
 from ..core.generator import initialize_generator
 from ..core.restore import restore_plan
@@ -62,6 +62,9 @@ class DiscoveryPlugin:
         # topic -> {"payload": <parsed dict>, "retain": bool}
         self.retained: Dict[str, Dict[str, Any]] = {}
         self.config_source = "default"
+        # The resolved live BridgeConfig (None until a bridge config is seen);
+        # kept so summarize() can advise on suboptimal settings.
+        self.bridge_cfg: Optional[BridgeConfig] = None
         self.namespace = None  # set by register() to ctx.state_namespace(...)
         self.backup_dir = BACKUP_DIR
         self._dirty = False
@@ -75,8 +78,10 @@ class DiscoveryPlugin:
         cfg_dict = self.ctx.bridge_config()
         if cfg_dict:
             self.config_source = "bridge"
-            return scheme_for(BridgeConfig.from_dict(cfg_dict))
+            self.bridge_cfg = BridgeConfig.from_dict(cfg_dict)
+            return scheme_for(self.bridge_cfg)
         self.config_source = "default"
+        self.bridge_cfg = None
         return None
 
     def _apply_bridge_config(self) -> None:
@@ -167,6 +172,9 @@ class DiscoveryPlugin:
             "config_source": self.config_source,
             "retained_topics": len(self.retained),
             "errors": results.get("errors", []),
+            # Read-only hints on suboptimal bridge settings; only when we can
+            # actually see the live bridge config (never for the default guess).
+            "advice": advise(self.bridge_cfg) if self.bridge_cfg is not None else [],
         }
 
     def status(self) -> Dict[str, Any]:

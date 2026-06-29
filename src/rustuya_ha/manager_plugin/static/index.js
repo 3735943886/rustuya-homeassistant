@@ -939,6 +939,28 @@ function renderGrid(ctx, data, view, rerender) {
   return list;
 }
 
+// Read-only advisory on suboptimal bridge settings (retain off, un-parseable
+// payload template, no {type}). Backend sends [{level, code}]; the UI owns the
+// text via advise.<code> + advise.<code>Fix. Empty list -> nothing renders.
+function renderAdvice(data) {
+  const advice = (data && data.advice) || [];
+  if (!advice.length) return null;
+  const box = el(
+    "div",
+    "mb-3 p-2 rounded bg-amber-50 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200 text-xs space-y-1.5",
+  );
+  box.appendChild(el("div", "font-medium", t("advise.title")));
+  for (const a of advice) {
+    const row = el("div");
+    row.appendChild(el("div", null, (a.level === "info" ? "ℹ " : "⚠ ") + t("advise." + a.code)));
+    row.appendChild(
+      el("div", "pl-4 text-amber-600 dark:text-amber-300/80", "→ " + t("advise." + a.code + "Fix")),
+    );
+    box.appendChild(row);
+  }
+  return box;
+}
+
 function renderErrors(data) {
   const errs = data.errors || [];
   if (!errs.length) return null;
@@ -1396,6 +1418,8 @@ export async function mount(rootEl, ctx) {
       );
       return;
     }
+    const advice = renderAdvice(data);
+    if (advice) body.appendChild(advice);
     // Search + sort first, then the category filter pills below them.
     body.appendChild(renderControls(data, view, render));
     body.appendChild(renderFilterTabs(ctx, data, view, render));

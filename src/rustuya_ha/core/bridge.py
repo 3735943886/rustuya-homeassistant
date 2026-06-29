@@ -218,3 +218,36 @@ def validate_payload_template(template: str) -> Optional[str]:
     if placeholder_path(template, "value") is None and placeholder_path(template, "dps") is None:
         return "payload template has no {value}/{dps} placeholder or is not JSON-shaped"
     return None
+
+
+def advise(config: BridgeConfig) -> List[Dict[str, str]]:
+    """Inspect a resolved bridge config and flag settings that produce a
+    working-but-degraded HA integration. Pure / observational — nothing here
+    changes behaviour; the frontend surfaces these as read-only hints.
+
+    The generator adapts to almost any topic/payload shape (flat command
+    topics, multi-DP payloads, missing ``{action}``/``{id}`` — all handled
+    transparently), so this deliberately flags only the few settings with a
+    *visible* quality cost, not every deviation from the default.
+
+    Each note is ``{"level": "warn"|"info", "code": <slug>}``; the UI owns the
+    human-readable text (i18n). An empty list means the config is optimal.
+    """
+    notes: List[Dict[str, str]] = []
+    # 1) Non-JSON / value-less payload template: the codec can't locate the
+    #    value, so no usable value_template can be built -> entities break.
+    if validate_payload_template(config.payload_template) is not None:
+        notes.append({"level": "warn", "code": "payload_unparseable"})
+    # 2) retain off: the bridge emits no retained `state` snapshot, so absolute
+    #    entities stay unknown until the device next reports and don't restore
+    #    on HA restart (HA discovery configs themselves are always retained).
+    if not config.retain:
+        notes.append({"level": "warn", "code": "retain_off"})
+    # 3) retain on, but `{type}` rides in neither the event topic nor the
+    #    payload: the retained snapshot shares a topic with transient
+    #    active/passive deltas and can't be told apart, so absolute entities
+    #    may briefly flicker on a passing delta. (Harmless under pass-through,
+    #    where deltas are idempotent last-write-wins — already covered by #2.)
+    elif "{type}" not in config.event_topic and config.type_path() is None:
+        notes.append({"level": "warn", "code": "no_type"})
+    return notes

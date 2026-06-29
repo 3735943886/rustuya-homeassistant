@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from rustuya_ha.core.bridge import (  # noqa: E402
-    BridgeConfig, render_topic, placeholder_path, jinja_accessor, LEGACY,
+    BridgeConfig, render_topic, placeholder_path, jinja_accessor, LEGACY, advise,
 )
 from rustuya_ha.core.scheme import BridgeTopicScheme, BridgePayloadCodec  # noqa: E402
 
@@ -139,3 +139,45 @@ def test_state_active_vs_state_topic():
     assert no_type.state("dev", "5") == "rustuya/event/dev/5"
     # legacy (no {type}) is unaffected by the flag
     assert BridgeTopicScheme(LEGACY).state("dev", "5", active=True) == "rustuya/event/dev/5"
+
+
+# --- advise (read-only bridge-config hints) ---
+
+def _codes(cfg):
+    return {n["code"] for n in advise(BridgeConfig.from_dict(cfg))}
+
+
+def test_advise_optimal_config_is_silent():
+    # The real-world recommended config: per-DP command+event, {type} in the
+    # event topic, retain on, bare {value} payload. Nothing to flag.
+    optimal = {
+        "mqtt_command_topic": "{root}/command/{action}/{id}/{dp}",
+        "mqtt_event_topic": "{root}/event/{type}/{id}/{dp}",
+        "mqtt_payload_template": "{value}",
+        "mqtt_retain": True,
+    }
+    assert advise(BridgeConfig.from_dict(optimal)) == []
+
+
+def test_advise_retain_off():
+    assert _codes({"mqtt_event_topic": "{root}/event/{type}/{id}/{dp}",
+                   "mqtt_retain": False}) == {"retain_off"}
+
+
+def test_advise_payload_unparseable():
+    codes = _codes({"mqtt_payload_template": "not json", "mqtt_retain": True})
+    assert "payload_unparseable" in codes
+
+
+def test_advise_no_type_only_when_retain_and_type_absent_everywhere():
+    # retain on, {type} in neither topic nor payload -> snapshot/delta collide.
+    assert _codes({"mqtt_event_topic": "{root}/event/{id}/{dp}",
+                   "mqtt_payload_template": "{value}", "mqtt_retain": True}) == {"no_type"}
+    # {type} in the event topic -> snapshot rides its own topic, no flag.
+    assert _codes({"mqtt_event_topic": "{root}/event/{type}/{id}/{dp}",
+                   "mqtt_payload_template": "{value}", "mqtt_retain": True}) == set()
+    # {type} in the payload (skip_active works) -> no flag. This is LEGACY's shape.
+    assert advise(LEGACY) == []
+    # retain off already says retain_off; no_type is moot under pass-through.
+    assert _codes({"mqtt_event_topic": "{root}/event/{id}/{dp}",
+                   "mqtt_payload_template": "{value}", "mqtt_retain": False}) == {"retain_off"}

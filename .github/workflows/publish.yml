@@ -124,6 +124,7 @@ jobs:
     permissions:
       contents: write  # create the release + upload assets
     steps:
+      - uses: actions/checkout@v6
       - uses: actions/download-artifact@v8
         with:
           name: dist
@@ -132,14 +133,30 @@ jobs:
         with:
           name: dropin
           path: dropin/
+      - name: Extract this release's section from CHANGELOG.md
+        # The hand-curated CHANGELOG.md is the single source of truth for release
+        # notes. Pull only the `## [<version>]` section (up to the next `## [`)
+        # for the GitHub Release body. GitHub's own generate_release_notes only
+        # lists merged PRs — most changes here land as direct commits, so they'd
+        # be invisible — and its "previous tag" heuristic skips pre-releases.
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          awk -v ver="$VER" '
+            $0 ~ ("^## \\[" ver "\\]") { cap=1; next }
+            cap && /^## \[/ { exit }
+            cap { print }
+          ' CHANGELOG.md | sed '1{/^$/d}' > RELEASE_NOTES.md
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "Release ${GITHUB_REF_NAME}. See CHANGELOG.md for details." > RELEASE_NOTES.md
+          fi
       - uses: softprops/action-gh-release@v3
         with:
+          body_path: RELEASE_NOTES.md
           files: |
             dist/*
             dropin/*
           # rc / a / b / dev tags are pre-releases; a bare vX.Y.Z is a full release.
           prerelease: ${{ contains(github.ref_name, 'rc') || contains(github.ref_name, 'a') || contains(github.ref_name, 'b') || contains(github.ref_name, 'dev') }}
-          generate_release_notes: true
 
   notify-catalog:
     # Nudge rustuya-manager to refresh its plugin catalog now, instead of waiting
