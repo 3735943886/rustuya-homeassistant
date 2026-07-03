@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rustuya-homeassistant"
-version = "0.0.1rc22"
+version = "0.1.0"
 description = "Generate & sync Home Assistant MQTT discovery for rustuya-bridge Tuya devices"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -13,7 +13,7 @@ license-files = ["LICENSE"]
 authors = [{ name = "3735943886" }]
 keywords = ["tuya", "home-assistant", "mqtt", "discovery", "rustuya-bridge"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Environment :: Console",
     "Intended Audience :: Developers",
     "Intended Audience :: End Users/Desktop",

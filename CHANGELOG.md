@@ -6,12 +6,38 @@ tag are the matching `## [version]` section extracted from here by the release
 workflow.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and the project versions are [PEP 440](https://peps.python.org/pep-0440/)
-pre-releases (`0.0.1rcN`) until the `0.1.0` final. rc tags publish to TestPyPI
-on a manual run and attach a GitHub Release (plus the drop-in plugin zip the
-rustuya-manager catalog consumes); the plain tag will publish to PyPI.
+and the project versions follow [PEP 440](https://peps.python.org/pep-0440/):
+`0.0.1rcN` pre-releases led up to the `0.1.0` final. Release channels:
+
+- **Manual run** (Actions → publish → *Run workflow*) rehearses the build on
+  **TestPyPI** — no tag involved.
+- **Any `v*` tag** publishes to **PyPI** and attaches a GitHub Release (plus the
+  drop-in plugin zip the rustuya-manager catalog consumes). An `rc`/`a`/`b`/`dev`
+  tag ships as a pre-release (so plain `pip install` skips it — `--pre` required);
+  a bare `vX.Y.Z` is the stable release.
 
 ## [Unreleased]
+
+## [0.1.0] — 2026-07-03
+
+First stable release. Graduates the `0.0.1rcN` pre-release line to a supported
+`0.1.0` with no functional change from `0.0.1rc22` — the cumulative feature set
+is documented in the `rc` sections below. Highlights of what `0.1.0` ships:
+
+- **Generate & sync HA MQTT discovery** for rustuya-bridge Tuya devices, as both
+  a `rustuya-ha` CLI (`status` / `preview` / `publish` / `clear` / `restore`) and
+  an importable pure-`core` library.
+- **Bridge-config-driven** topic/value-template derivation (per-DP, multi-DP, and
+  flat-command layouts), retained-`state` snapshot reads for stateful entities,
+  and passive companion sensors for delta DPs.
+- **rustuya-manager plugin**: an "HA Discovery" tab (live status, diff,
+  publish/clear/restore, drop-in converter editing), loadable via the `[manager]`
+  pip extra or as a Docker drop-in. On an api_version ≥ 3 host it declares its
+  topic/retain requirements (`require_topic` / `require_retain`), a no-op on
+  older hosts.
+- **Drop-in converter pack**: read-only curated defaults plus live-updatable and
+  user-authored `custom_converters/` (JSON overrides + Python code converters),
+  including the generic JSON-driven cover converter.
 
 ## [0.0.1rc22] — 2026-06-29
 
