@@ -608,6 +608,45 @@ def test_register_skips_requirements_on_pre_v3_host():
     assert ctx.topic_requirements == []
 
 
+class _CtxV4(FakeCtx):
+    """A host that offers the device-set bus (ctx.watch_devices, api_version >= 4)."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.device_watchers = []
+
+    def watch_devices(self, handler):
+        self.device_watchers.append(handler)
+
+
+def test_register_wires_device_watcher_that_repushes_on_change():
+    pytest.importorskip("fastapi")
+    ctx = _CtxV4(devices=DEVICES, bridge_cfg=LEGACY_CFG, api_version=4)
+    register(ctx)
+    # One watcher registered; no push yet (register doesn't push the grid).
+    assert len(ctx.device_watchers) == 1
+    assert ctx.ns.data is None
+
+    # Simulate the manager adding a device to the cloud, then fire the watcher.
+    new = dict(DEVICES[0], id="NEW-DEV-999", name="freshly added")
+    ctx._devices[new["id"]] = new
+    asyncio.run(ctx.device_watchers[0]())
+
+    # The grid was recomputed and pushed, and now includes the new device.
+    assert ctx.ns.data is not None
+    ids = {d["id"] for d in ctx.ns.data["devices"]}
+    assert "NEW-DEV-999" in ids
+
+
+def test_register_device_watcher_noop_on_old_host():
+    pytest.importorskip("fastapi")
+    # Base FakeCtx has no watch_devices → feature-detect leaves it unwired; the
+    # plugin still registers fine (grid just won't auto-refresh on device add).
+    ctx = FakeCtx(devices=DEVICES, bridge_cfg=LEGACY_CFG, api_version=3)
+    assert register(ctx) is not None
+    assert not hasattr(ctx, "device_watchers")
+
+
 # ── code converters (api_version >= 2 reactive runtime) ──────────────────
 class _RuntimeCtx:
     """Fake host implementing the api_version>=2 reactive runtime: enough to

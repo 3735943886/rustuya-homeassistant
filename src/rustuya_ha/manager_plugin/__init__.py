@@ -519,6 +519,18 @@ def register(ctx: Any) -> None:
         except Exception:  # a declaration hiccup must never block startup
             logger.debug("rustuya-ha: topic/retain requirements not declared", exc_info=True)
 
+    # Recompute + re-push the status grid whenever the cloud device set changes
+    # (a device added or removed in the manager) — the host's device-set bus
+    # (api_version >= 4). Without it a newly added device surfaces in the grid
+    # only on the next homeassistant/# message or write action. Method-presence
+    # feature-detect: a no-op on an older host that lacks the bus.
+    watch_devices = getattr(ctx, "watch_devices", None)
+    if callable(watch_devices):
+        try:
+            watch_devices(plugin.push)
+        except Exception:  # a wiring hiccup must never block startup
+            logger.debug("rustuya-ha: device-set watcher not wired", exc_info=True)
+
     # Load user Python code converters (custom_converters/*.py): per-device
     # derivation logic that reacts to decoded DPs and publishes derived DPs via
     # the manager runtime. Self-guards to a no-op on a host with api_version < 2.
