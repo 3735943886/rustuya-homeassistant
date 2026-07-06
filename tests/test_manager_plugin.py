@@ -609,7 +609,10 @@ def test_register_skips_requirements_on_pre_v3_host():
 
 
 class _CtxV4(FakeCtx):
-    """A host that offers the device-set bus (ctx.watch_devices, api_version >= 4)."""
+    """A host that offers the device-set bus (ctx.watch_devices, api_version >= 4).
+
+    Mirrors the manager's contract: the handler is called with the new device set
+    ({id: raw_data}, same shape as devices())."""
 
     def __init__(self, **kw):
         super().__init__(**kw)
@@ -617,6 +620,11 @@ class _CtxV4(FakeCtx):
 
     def watch_devices(self, handler):
         self.device_watchers.append(handler)
+
+    async def fire_device_change(self):
+        """Emulate State.set_cloud notifying watchers with the current set."""
+        for h in self.device_watchers:
+            await h(self.devices())
 
 
 def test_register_wires_device_watcher_that_repushes_on_change():
@@ -627,10 +635,11 @@ def test_register_wires_device_watcher_that_repushes_on_change():
     assert len(ctx.device_watchers) == 1
     assert ctx.ns.data is None
 
-    # Simulate the manager adding a device to the cloud, then fire the watcher.
+    # Simulate the manager adding a device to the cloud, then fire the watcher
+    # with the new set (the host passes it as the handler's argument).
     new = dict(DEVICES[0], id="NEW-DEV-999", name="freshly added")
     ctx._devices[new["id"]] = new
-    asyncio.run(ctx.device_watchers[0]())
+    asyncio.run(ctx.fire_device_change())
 
     # The grid was recomputed and pushed, and now includes the new device.
     assert ctx.ns.data is not None

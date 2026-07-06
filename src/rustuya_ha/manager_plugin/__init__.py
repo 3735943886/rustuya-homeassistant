@@ -522,12 +522,18 @@ def register(ctx: Any) -> None:
     # Recompute + re-push the status grid whenever the cloud device set changes
     # (a device added or removed in the manager) — the host's device-set bus
     # (api_version >= 4). Without it a newly added device surfaces in the grid
-    # only on the next homeassistant/# message or write action. Method-presence
-    # feature-detect: a no-op on an older host that lacks the bus.
+    # only on the next homeassistant/# message or write action. The host calls
+    # the handler with the new device set; we ignore it and let push() re-read
+    # the live devices() to recompute (the host also replays the current set once
+    # at startup, so this seeds the grid at boot). Method-presence feature-detect:
+    # a no-op on an older host that lacks the bus.
     watch_devices = getattr(ctx, "watch_devices", None)
     if callable(watch_devices):
+        async def _on_devices_changed(_devices: Any) -> None:
+            await plugin.push()
+
         try:
-            watch_devices(plugin.push)
+            watch_devices(_on_devices_changed)
         except Exception:  # a wiring hiccup must never block startup
             logger.debug("rustuya-ha: device-set watcher not wired", exc_info=True)
 
