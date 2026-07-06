@@ -7,7 +7,7 @@ workflow.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the project versions follow [PEP 440](https://peps.python.org/pep-0440/):
-`0.0.1rcN` pre-releases led up to the `0.1.0` final. Release channels:
+`0.0.1rcN` pre-releases lead up to the `0.1.0` final. Release channels:
 
 - **Manual run** (Actions → publish → *Run workflow*) rehearses the build on
   **TestPyPI** — no tag involved.
@@ -18,26 +18,18 @@ and the project versions follow [PEP 440](https://peps.python.org/pep-0440/):
 
 ## [Unreleased]
 
-## [0.1.0] — 2026-07-03
+## [0.0.1rc23] — 2026-07-06
 
-First stable release. Graduates the `0.0.1rcN` pre-release line to a supported
-`0.1.0` with no functional change from `0.0.1rc22` — the cumulative feature set
-is documented in the `rc` sections below. Highlights of what `0.1.0` ships:
+### Added
 
-- **Generate & sync HA MQTT discovery** for rustuya-bridge Tuya devices, as both
-  a `rustuya-ha` CLI (`status` / `preview` / `publish` / `clear` / `restore`) and
-  an importable pure-`core` library.
-- **Bridge-config-driven** topic/value-template derivation (per-DP, multi-DP, and
-  flat-command layouts), retained-`state` snapshot reads for stateful entities,
-  and passive companion sensors for delta DPs.
-- **rustuya-manager plugin**: an "HA Discovery" tab (live status, diff,
-  publish/clear/restore, drop-in converter editing), loadable via the `[manager]`
-  pip extra or as a Docker drop-in. On an api_version ≥ 3 host it declares its
-  topic/retain requirements (`require_topic` / `require_retain`), a no-op on
-  older hosts.
-- **Drop-in converter pack**: read-only curated defaults plus live-updatable and
-  user-authored `custom_converters/` (JSON overrides + Python code converters),
-  including the generic JSON-driven cover converter.
+- **Status grid refreshes when the cloud device set changes.** The plugin now
+  wires the manager's device-set bus (`ctx.watch_devices`, host api_version ≥ 4,
+  in rustuya-manager `0.1.0rc74`): adding or removing a device in the manager
+  (devices upload / login wizard) re-runs the verifier against the live device
+  list and re-pushes the grid, instead of the device surfacing only on the next
+  `homeassistant/#` message or write action. The host also replays the current
+  set at startup, so the grid seeds at boot. Method-presence feature-detect — a
+  no-op on an older host that lacks the bus (previous surfacing behavior kept).
 
 ## [0.0.1rc22] — 2026-06-29
 

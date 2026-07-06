@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "rustuya-homeassistant"
-version = "0.1.0"
+version = "0.0.1rc23"
 description = "Generate & sync Home Assistant MQTT discovery for rustuya-bridge Tuya devices"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -13,7 +13,7 @@ license-files = ["LICENSE"]
 authors = [{ name = "3735943886" }]
 keywords = ["tuya", "home-assistant", "mqtt", "discovery", "rustuya-bridge"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Intended Audience :: Developers",
     "Intended Audience :: End Users/Desktop",
@@ -35,7 +35,7 @@ dependencies = [
 # the entry-point below is discovered by rustuya-manager and an "HA Discovery" tab appears.
 # The dependency arrow is one-way: rustuya-ha -> rustuya-manager, never the reverse.
 manager = [
-    "rustuya-manager>=0.1.0",
+    "rustuya-manager>=0.1.0rc74",
 ]
 
 [project.entry-points."rustuya_manager.plugins"]
