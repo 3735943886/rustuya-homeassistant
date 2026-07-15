@@ -1,8 +1,11 @@
 """Compare generator output against retained MQTT discovery state and
 categorize each device. Category-filter helpers live here too."""
+import logging
 from typing import Dict, List
 
 from .scheme import DEFAULT_MANUFACTURER
+
+logger = logging.getLogger(__name__)
 
 CATEGORY_ALIASES = {
     "mismatched": "mismatched_payload",
@@ -108,8 +111,12 @@ class DiscoveryVerifier:
                 device_map[d['id']]["expected_count"] = len(payloads)
                 for topic, payload in payloads.items():
                     expected_map[topic] = {"payload": payload, "device_id": d['id']}
-            except Exception as e:
-                errors_list.append(f"Gen error ({d['id']}): {e}")
+            except Exception:
+                # Log the full exception server-side; surface only a generic
+                # message to the API so exception/stack-trace detail never
+                # reaches an external caller (py/stack-trace-exposure).
+                logger.exception("rustuya-ha: discovery generation failed for %s", d.get("id"))
+                errors_list.append(f"Gen error ({d['id']}): generation failed")
         return expected_map
 
     def _determine_category(self, d: Dict) -> str:
