@@ -18,6 +18,32 @@ and the project versions follow [PEP 440](https://peps.python.org/pep-0440/):
 
 ## [Unreleased]
 
+## [0.0.1rc24] — 2026-09-16
+
+### Changed
+
+- **Split the generic Tuya-DP → HA conversion out of the CLI/plugin
+  plumbing.** `rustuya_ha.tuya2ha` is now a self-contained, sans-I/O
+  subpackage: DP → entity classification is fully separated from MQTT-
+  discovery rendering, via an intermediate entity representation
+  (`EntityIL`/`DpRole`, using HA's own entity-attribute vocabulary) that knows
+  nothing about topics or Jinja templates. `DiscoveryGenerator` (public API
+  unchanged) is now a thin classify → render → apply-overrides orchestrator.
+  Goal: the DP-to-HA-entity decision logic can be reused wherever it's needed
+  — MQTT discovery today, potentially a native HA integration component later
+  — without pulling in this project's CLI/backup/pack/webui machinery.
+- **Custom-converter override merging is sans-I/O too.** The per-product_id
+  JSON override merge/lookup (`DictConverter`, `deep_merge`) now works over an
+  in-memory mapping with zero file access; the `custom_converters/` directory
+  loader composes it instead of duplicating the logic.
+- **Extracted the drop-in `.py` code-converter loader into a standalone
+  `plugin_engine`** (isolated dynamic import + `setup(api)`, a generic `ctx`
+  facade) with no Tuya/HA knowledge — reusable by any rustuya-manager plugin
+  wanting the same drop-in-`.py` pattern.
+- No functional change: discovery-payload output is byte-for-byte identical
+  to `0.0.1rc23` (verified against both the real-device and synthetic
+  snapshot suites).
+
 ## [0.0.1rc23] — 2026-07-06
 
 ### Added
