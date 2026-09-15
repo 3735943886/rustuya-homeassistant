@@ -218,3 +218,38 @@ def validate_payload_template(template: str) -> Optional[str]:
     if placeholder_path(template, "value") is None and placeholder_path(template, "dps") is None:
         return "payload template has no {value}/{dps} placeholder or is not JSON-shaped"
     return None
+
+
+# --- rustuya errorCode reference ---
+# Full dictionary of errorCodes that rustuya publishes to the
+# rustuya/error/<device_id> topic. Reference-only (not consumed by code) — a
+# human lookup table for whoever's debugging device connectivity. The subset
+# that marks an HA entity unavailable is tuya2ha.scheme.UNAVAILABLE_ERROR_CODES
+# (a separate, small, independently-overridable constant — it's DefaultPayloadCodec's
+# own default, not derived from this table at runtime).
+# Source: rustuya/src/... define_error_codes! macro
+#
+# Columns: (name, human-readable message, emitter)
+#   - "rustuya": rustuya emits this itself when it cannot reach the device or
+#                 gets no response
+#   - "device":  the device responded and rustuya forwarded it (i.e. the device
+#                is alive)
+#   - "cloud":   Tuya cloud communication layer (unrelated to device health)
+ERROR_CODES = {
+    0:   ("ERR_SUCCESS",    "Connection Successful",             "device"),
+    900: ("ERR_JSON",       "Invalid JSON Response from Device", "device"),
+    901: ("ERR_CONNECT",    "Network Error: Unable to Connect",  "rustuya"),
+    902: ("ERR_TIMEOUT",    "Timeout Waiting for Device",        "rustuya"),
+    903: ("ERR_RANGE",      "Specified Value Out of Range",      "device"),
+    904: ("ERR_PAYLOAD",    "Unexpected Payload from Device",    "device"),
+    905: ("ERR_OFFLINE",    "Network Error: Device Unreachable", "rustuya"),
+    906: ("ERR_STATE",      "Device in Unknown State",           "device"),
+    907: ("ERR_FUNCTION",   "Function Not Supported by Device",  "device"),
+    908: ("ERR_DEVTYPE",    "Device22 Detected: Retry Command",  "device"),
+    909: ("ERR_CLOUDKEY",   "Missing Tuya Cloud Key and Secret", "cloud"),
+    910: ("ERR_CLOUDRESP",  "Invalid JSON Response from Cloud",  "cloud"),
+    911: ("ERR_CLOUDTOKEN", "Unable to Get Cloud Token",         "cloud"),
+    912: ("ERR_PARAMS",     "Missing Function Parameters",       "cloud"),
+    913: ("ERR_CLOUD",      "Error Response from Tuya Cloud",    "cloud"),
+    914: ("ERR_KEY_OR_VER", "Check device key or version",       "device"),
+}

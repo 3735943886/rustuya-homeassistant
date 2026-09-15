@@ -1,21 +1,4 @@
-# --- Unit Normalization ---
-UNIT_MAP = {
-    'w': 'W', 'kwh': 'kWh', 'kw': 'kW', 'v': 'V', 'ma': 'mA', 'a': 'A',
-    'c': '°C', 'f': '°F', '℃': '°C', '℉': '°F', 'pct': '%', 'percent': '%', 'lux': 'lx'
-}
-
-UNIT_OVERRIDES = {
-    'temperature': '°C',
-    'humidity': '%',
-    'battery': '%',
-    'illuminance': 'lx',
-    'power': 'W',
-    'voltage': 'V',
-    'current': 'mA',
-    'energy': 'kWh'
-}
-
-# --- Unit Normalization Data (Advanced) ---
+# --- Unit Normalization Data ---
 UNIT_NORM_MAP = {
     "°C": {"℃", "°c", "c", "celsius"},
     "°F": {"℉", "°f", "f", "fahrenheit"},
@@ -106,22 +89,21 @@ DP_CODE_MAP = {
 }
 
 # --- Active/state value semantics ---
-# rustuya-bridge publishes each update as several flavors (see bridge README §Events):
-#   active/passive = the raw delta that just arrived (no-retain; the "moment of
-#                    change"); active = device-initiated, passive = readback/report
-#   state          = full retained snapshot (current state, recoverable on reconnect),
-#                    cache mode only (mqtt_retain)
+# A device-side transport (rustuya-bridge or otherwise) publishes each DP update
+# as several flavors: an "active" push (device-initiated), a "passive"
+# readback/report, or a retained "state" snapshot. See TopicScheme.state()/
+# PayloadCodec.value_template() docs for how a scheme routes those.
 #
-# Almost every DP is an ABSOLUTE STATE (temperature, switch, mode...) → read the
-# retained `state` snapshot. But a few Tuya DPs are CUMULATIVE-INCREMENT / delta
-# values that only make sense on the active push — reading them from the retained
-# state snapshot re-delivers a stale increment (double-count / phantom on
+# Almost every DP is an ABSOLUTE STATE (temperature, switch, mode...) -> read the
+# retained snapshot. But a few Tuya DPs are CUMULATIVE-INCREMENT / delta values
+# that only make sense on the active push -- reading them from a retained
+# snapshot re-delivers a stale increment (double-count / phantom on
 # reconnect). Those few are listed here and treated like `event` entities:
 # subscribe the `active` stream, ignore the snapshot.
 #
 # This is a Tuya smell (a "sensor" that is really an event). Keep the set MINIMAL
 # and explicit. NOTE: cumulative TOTALS (e.g. "energy" = total kWh) are absolute
-# state and must NOT be here — only the per-report increments belong.
+# state and must NOT be here -- only the per-report increments belong.
 # Per-device exceptions can also be set via custom_converters dp_meta "active": true.
 ACTIVE_ONLY_CODES = {
     "add_ele",  # incremental energy added since last report (NOT a running total)
@@ -170,7 +152,7 @@ TUYA_CATEGORIES = {
 # overrides from GENERIC_MAP. Unregistered categories fall back to generic
 # individual DP handling.
 # Categories present in TUYA_CATEGORIES but missing here (e.g. cjkg, ckqdkg, dlq,
-# pir) are intentionally unregistered — handled via generic fallback until a
+# pir) are intentionally unregistered -- handled via generic fallback until a
 # clearer mapping is known.
 CATEGORY_MAP = {
     # Cover / Curtain
@@ -219,7 +201,7 @@ GENERIC_MAP = {
     # mcs (Contact sensor): some devices report contact state via the 'switch' code
     # (e.g. Door Sensor, product_id 7jIGJAymiH8OsFFb).
     # DP_CODE_MAP['switch'] maps to a controllable switch, but on mcs it should be
-    # a read-only binary_sensor — override at the category level.
+    # a read-only binary_sensor -- override at the category level.
     "mcs": {"switch": ("binary_sensor", "door", None, None)},
 }
 
@@ -243,58 +225,3 @@ PROPERTY_MAP = {
     "illuminance": ("sensor", "illuminance", "lx", None),
     "distance": ("sensor", "distance", "m", None),
 }
-
-# --- rustuya errorCode Mapping ---
-# Full dictionary of errorCodes that rustuya publishes to the
-# rustuya/error/<device_id> topic.
-# Source: rustuya/src/... define_error_codes! macro
-#
-# Columns: (name, human-readable message, emitter)
-#   - "rustuya": rustuya emits this itself when it cannot reach the device or
-#                 gets no response
-#   - "device":  the device responded and rustuya forwarded it (i.e. the device
-#                 is alive)
-#   - "cloud":   Tuya cloud communication layer (unrelated to device health)
-ERROR_CODES = {
-    0:   ("ERR_SUCCESS",    "Connection Successful",             "device"),
-    900: ("ERR_JSON",       "Invalid JSON Response from Device", "device"),
-    901: ("ERR_CONNECT",    "Network Error: Unable to Connect",  "rustuya"),
-    902: ("ERR_TIMEOUT",    "Timeout Waiting for Device",        "rustuya"),
-    903: ("ERR_RANGE",      "Specified Value Out of Range",      "device"),
-    904: ("ERR_PAYLOAD",    "Unexpected Payload from Device",    "device"),
-    905: ("ERR_OFFLINE",    "Network Error: Device Unreachable", "rustuya"),
-    906: ("ERR_STATE",      "Device in Unknown State",           "device"),
-    907: ("ERR_FUNCTION",   "Function Not Supported by Device",  "device"),
-    908: ("ERR_DEVTYPE",    "Device22 Detected: Retry Command",  "device"),
-    909: ("ERR_CLOUDKEY",   "Missing Tuya Cloud Key and Secret", "cloud"),
-    910: ("ERR_CLOUDRESP",  "Invalid JSON Response from Cloud",  "cloud"),
-    911: ("ERR_CLOUDTOKEN", "Unable to Get Cloud Token",         "cloud"),
-    912: ("ERR_PARAMS",     "Missing Function Parameters",       "cloud"),
-    913: ("ERR_CLOUD",      "Error Response from Tuya Cloud",    "cloud"),
-    914: ("ERR_KEY_OR_VER", "Check device key or version",       "device"),
-}
-
-# Subset of errorCodes from the dictionary above that should mark an HA entity
-# as unavailable. `tuya_discovery_generator`'s availability_template references
-# this list and is regenerated automatically, so when new codes appear just edit
-# this list and regenerate the golden output.
-#
-# Editing guide:
-#   - 901 ERR_CONNECT, 905 ERR_OFFLINE  -> emitted by rustuya on comm failure
-#                                          (clearly unavailable)
-#   - 914 ERR_KEY_OR_VER                -> device responds, but key/version
-#                                          mismatch blocks all commands.
-#                                          Requires re-registration. Functionally
-#                                          unavailable.
-#   - 902 ERR_TIMEOUT (excluded)        -> can be transient; excluded to avoid
-#                                          false unavailable. Add it if real
-#                                          offline cases are being missed in
-#                                          practice.
-#   - Other device-emitted (900/903/904/906/907/908)
-#                                       -> the device replied = it's alive. Only
-#                                          specific commands fail, so keep the
-#                                          entity available (unlike 914, other
-#                                          commands still work).
-#   - 909~913 (cloud)                   -> unrelated to device health; no value
-#                                          adding them.
-UNAVAILABLE_ERROR_CODES = [901, 905, 914]

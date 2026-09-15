@@ -76,6 +76,8 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from ..tuya2ha.converter import DictConverter, deep_merge
+
 logger = logging.getLogger("user_converter")
 
 # The drop-in directory name, and the env var (which may point at the directory
@@ -148,17 +150,6 @@ def py_files(path: Optional[str] = None) -> List[Path]:
     if not target.is_dir():
         return []
     return sorted(p for p in target.glob("*.py") if not p.name.startswith(("_", ".")))
-
-
-def _deep_merge(dst: Dict[str, Any], src: Dict[str, Any]) -> Dict[str, Any]:
-    """Recursively merge `src` into `dst` (last writer wins on leaves); nested
-    dicts combine rather than replace — so one product_id may span files."""
-    for k, v in src.items():
-        if k in dst and isinstance(dst[k], dict) and isinstance(v, dict):
-            _deep_merge(dst[k], v)
-        else:
-            dst[k] = v
-    return dst
 
 
 def load_converters(path: Optional[str] = None) -> Dict[str, Any]:
@@ -242,27 +233,27 @@ def delete_file(name: str, path: Optional[str] = None) -> None:
     (savable_dir(path) / _safe_name(name)).unlink(missing_ok=True)
 
 
-class UserConverter:
+class UserConverter(DictConverter):
+    """The `custom_converters/` drop-in directory loader: reads and
+    deep-merges every `*.json` file it finds there. The merge/lookup logic
+    itself (`.find()`, deep-merge-on-load) is generic and I/O-free — see
+    `tuya2ha.converter.DictConverter`/`deep_merge`, which this composes with
+    the one project-specific piece: resolving and reading the directory."""
+
     def __init__(self, path: Optional[str] = None):
         self.path = resolve_path(path)
-        self.mapping: Dict[str, Any] = {}
-        self._load()
+        super().__init__(self._load())
 
-    def _load(self):
+    def _load(self) -> Dict[str, Any]:
         merged: Dict[str, Any] = {}
         for f in _json_files(self.path):
             try:
                 with open(f, encoding="utf-8") as fh:
                     data = json.load(fh)
                 if isinstance(data, dict):
-                    _deep_merge(merged, data)
+                    deep_merge(merged, data)
                 else:
                     logger.error(f"Ignoring non-object converter file {f}")
             except Exception as e:
                 logger.error(f"Failed to load {f}: {e}")
-        self.mapping = merged
-
-    def find(self, product_id: Optional[str]) -> Optional[Dict[str, Any]]:
-        if not product_id:
-            return None
-        return self.mapping.get(product_id)
+        return merged
