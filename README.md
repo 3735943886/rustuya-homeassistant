@@ -1,17 +1,18 @@
 # rustuya-homeassistant
 
-> **Retired: use [rustuya-local](https://github.com/3735943886/rustuya-local) instead.** Tuya devices now go
-> rustuya-bridge → [tuya2ildevice](https://github.com/3735943886/tuya2ildevice) (all Tuya knowledge, Home Assistant
-> core's `tuya` behaviour) → IL, and rustuya-local shows them in Home Assistant through MQTT discovery (as a daemon or
-> as a rustuya-manager plugin, no custom integration) or through the il-ha integration. This package gets no new
-> features. Moving over:
+> **Retired: use [rustuya-local](https://github.com/3735943886/rustuya-local) with
+> [il-ha](https://github.com/3735943886/ildevice-homeassistant) instead.** Tuya devices now go rustuya-bridge →
+> [tuya2ildevice](https://github.com/3735943886/tuya2ildevice) (all Tuya knowledge, Home Assistant core's `tuya`
+> behaviour) → IL, published by rustuya-local (a daemon, a Home Assistant integration, or a rustuya-manager plugin);
+> the il-ha integration (HACS) turns IL into Home Assistant entities. MQTT discovery is no longer used. This package
+> gets no new features. Moving over:
 >
+> - Remove this package's discovery configs first (`rustuya-ha clear '*'`) and uninstall its manager plugin, or every
+>   device appears twice. Entity IDs change with il-ha; automations that name them need updating.
 > - `custom_converters/*.json` work as they are: rustuya-local reads a `custom_converters/` directory and converts
 >   this format (`dp_meta`, `model`, `discovery_overrides.cover`); other `discovery_overrides` are reported and dropped.
 > - The curated pack (`00_default.json`, `00_curtain.py`) is built into tuya2ildevice.
 > - A `*.py` code converter (`setup(api)`) has to be ported to a tuya2ildevice `Converter`.
-> - Remove this package's discovery (`rustuya-ha clear '*'`) and uninstall its manager plugin before turning
->   rustuya-local's discovery on, or every entity appears twice.
 
 Generate and sync **Home Assistant MQTT Discovery** payloads for Tuya devices
 bridged by [rustuya-bridge](https://github.com/3735943886/rustuya-bridge).
