@@ -42,8 +42,8 @@ manager = [
 discovery = "rustuya_ha.manager_plugin:register"
 
 [project.urls]
-Homepage = "https://github.com/3735943886/rustuya-homeassistant-v1"
-Repository = "https://github.com/3735943886/rustuya-homeassistant-v1"
+Homepage = "https://github.com/3735943886/rustuya-homeassistant"
+Repository = "https://github.com/3735943886/rustuya-homeassistant"
 
 [project.scripts]
 rustuya-ha = "rustuya_ha.cli.app:main"
