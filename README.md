@@ -1,11 +1,13 @@
-# rustuya-homeassistant
+# rustuya-homeassistant v1 (retired)
 
-> **Retired: use [rustuya-local](https://github.com/3735943886/rustuya-local) with
+> This repository was `rustuya-homeassistant` until 2026-09-27; that name now belongs to its successor.
+>
+> **Retired: use [rustuya-local](https://github.com/3735943886/rustuya-homeassistant) with
 > [il-ha](https://github.com/3735943886/ildevice-homeassistant) instead.** Tuya devices now go rustuya-bridge →
 > [tuya2ildevice](https://github.com/3735943886/tuya2ildevice) (all Tuya knowledge, Home Assistant core's `tuya`
 > behaviour) → IL, published by rustuya-local (a daemon, a Home Assistant integration, or a rustuya-manager plugin);
 > the il-ha integration (HACS) turns IL into Home Assistant entities. MQTT discovery is no longer used. This package
-> gets no new features. Step by step: [MIGRATING.md](https://github.com/3735943886/rustuya-local/blob/master/docs/MIGRATING.md). In short:
+> gets no new features. Step by step: [MIGRATING.md](https://github.com/3735943886/rustuya-homeassistant/blob/master/docs/MIGRATING.md). In short:
 >
 > - Remove this package's discovery configs first (`rustuya-ha clear '*'`) and uninstall its manager plugin, or every
 >   device appears twice. Entity IDs change with il-ha; automations that name them need updating.
@@ -105,13 +107,13 @@ cd /your/manager/data && mkdir -p plugins
 
 # (a) From a GitHub Release — no pip, no PyPI (wheel attached on each v* tag).
 #     The asset filename carries the version, so grab it from the Releases page
-#     ( https://github.com/3735943886/rustuya-homeassistant/releases ), or pin a
+#     ( https://github.com/3735943886/rustuya-homeassistant-v1/releases ), or pin a
 #     version directly:
-curl -L -O https://github.com/3735943886/rustuya-homeassistant/releases/download/v0.1.0/rustuya_homeassistant-0.1.0-py3-none-any.whl
+curl -L -O https://github.com/3735943886/rustuya-homeassistant-v1/releases/download/v0.1.0/rustuya_homeassistant-0.1.0-py3-none-any.whl
 cd plugins && unzip -o ../rustuya_homeassistant-*.whl 'rustuya_ha/*'
 
 # (b) Straight from source (no release needed — it's just a directory):
-curl -L https://github.com/3735943886/rustuya-homeassistant/archive/refs/heads/master.tar.gz \
+curl -L https://github.com/3735943886/rustuya-homeassistant-v1/archive/refs/heads/master.tar.gz \
   | tar xz -C plugins --wildcards --strip-components=2 '*/src/rustuya_ha/*'
 
 # (c) From a checkout:

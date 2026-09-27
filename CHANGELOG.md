@@ -20,7 +20,7 @@ and the project versions follow [PEP 440](https://peps.python.org/pep-0440/):
 
 ### Deprecated
 
-- **Retired in favour of [rustuya-local](https://github.com/3735943886/rustuya-local) with il-ha.** Tuya
+- **Retired in favour of [rustuya-local](https://github.com/3735943886/rustuya-homeassistant) with il-ha.** Tuya
   interpretation lives in tuya2ildevice (reproducing Home Assistant core's `tuya` integration); rustuya-local publishes
   IL (as a daemon, a Home Assistant integration or a rustuya-manager plugin) and the il-ha integration turns it into
   entities. MQTT discovery is no longer used. `custom_converters` JSON files keep working (converted on load); code
